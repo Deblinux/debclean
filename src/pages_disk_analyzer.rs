@@ -1,3 +1,4 @@
+use crate::i18n::t;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -190,12 +191,12 @@ pub fn scan_heavy_caches() -> Vec<HeavyCacheDir> {
     let home_p = PathBuf::from(&home);
 
     let candidates: Vec<(&str, PathBuf)> = vec![
-        ("Cache utente (~/.cache)", home_p.join(".cache")),
-        ("Miniature (.cache/thumbnails)", home_p.join(".cache/thumbnails")),
-        ("Cache Firefox", home_p.join(".cache/mozilla/firefox")),
-        ("Cache Chrome / Chromium", home_p.join(".cache/google-chrome")),
-        ("Cache Flatpak", home_p.join(".var/app")),
-        ("Cache pacchetti APT (/var/cache/apt)", PathBuf::from("/var/cache/apt/archives")),
+        (t("Cache utente (~/.cache)"), home_p.join(".cache")),
+        (t("Miniature (.cache/thumbnails)"), home_p.join(".cache/thumbnails")),
+        (t("Cache Firefox"), home_p.join(".cache/mozilla/firefox")),
+        (t("Cache Chrome / Chromium"), home_p.join(".cache/google-chrome")),
+        (t("Cache Flatpak"), home_p.join(".var/app")),
+        (t("Cache pacchetti APT (/var/cache/apt)"), PathBuf::from("/var/cache/apt/archives")),
     ];
 
     let mut found = Vec::new();

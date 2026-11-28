@@ -84,7 +84,7 @@ impl App {
         ui.add_space(3.0);
 
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("📥 Importa file .conf / .ovpn"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("📥 Importa file .conf / .ovpn"), self.action_enabled()).clicked() {
                 // `spawn` imposta `busy`: import e connessioni non possono
                 // sovrapporsi generando più finestre pkexec.
                 self.spawn(ctx, |ch: &Chan| {

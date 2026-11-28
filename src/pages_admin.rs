@@ -1,3 +1,4 @@
+use crate::config_parsers::{self, AptLineKind};
 use crate::i18n::{t, tf, tr};
 use crate::{fix_job, health, ui, util, App, Job, Msg, ProgressReporter};
 use eframe::egui;
@@ -96,13 +97,14 @@ pub(crate) fn collect_repo_entries() -> Vec<RepoEntry> {
             continue;
         }
         if let Ok(txt) = fs::read_to_string(&p) {
-            for (i, raw) in txt.lines().enumerate() {
-                let line = raw.trim();
-                if line.starts_with("deb ") || line.starts_with("deb-src ") {
+            for parsed in config_parsers::parse_apt_lines(&txt) {
+                if parsed.enabled
+                    && matches!(parsed.kind, AptLineKind::Deb | AptLineKind::DebSrc)
+                {
                     out.push(RepoEntry {
                         path: p.clone(),
-                        line: Some(i + 1),
-                        text: line.to_string(),
+                        line: Some(parsed.number),
+                        text: parsed.text.to_string(),
                         selected: false,
                     });
                 }
@@ -357,12 +359,7 @@ fn read_gov_avail() -> Vec<String> {
 
 pub fn read_grub_line() -> String {
     fs::read_to_string("/etc/default/grub")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("GRUB_CMDLINE_LINUX_DEFAULT="))
-                .map(|l| l.trim_start_matches("GRUB_CMDLINE_LINUX_DEFAULT=").trim_matches('"').to_string())
-        })
+        .map(|s| config_parsers::grub_value(&s, "GRUB_CMDLINE_LINUX_DEFAULT"))
         .unwrap_or_default()
 }
 
@@ -614,11 +611,11 @@ impl App {
         let all_fixes: String = fix_list.join(" && ");
         
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔄 Esegui controlli"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔄 Esegui controlli"))).clicked() {
                 self.spawn(ctx, |ch| ch.send(Msg::Checks(health::run_checks())));
             }
             if ui
-                .add_enabled(!self.busy && !all_fixes.is_empty(), egui::Button::new(t("🛠 Correggi tutto")))
+                .add_enabled(self.action_enabled() && !all_fixes.is_empty(), egui::Button::new(t("🛠 Correggi tutto")))
                 .clicked()
             {
                 self.spawn_snapshot(ctx, fix_job(all_fixes.clone()));
@@ -645,7 +642,7 @@ impl App {
                     ui.label(egui::RichText::new(t(c.name)).strong().size(18.0));
                     if let Some(f) = c.fix {
                         if c.status != health::Status::Ok
-                            && ui.add_enabled(!self.busy, egui::Button::new(t("Correggi"))).clicked()
+                            && ui.add_enabled(self.action_enabled(), egui::Button::new(t("Correggi"))).clicked()
                         {
                             fix_one = Some(f.to_string());
                         }
@@ -665,7 +662,7 @@ ui.add_space(3.0);
         ui.label(t("Rileva automaticamente le firme digitali mancanti (NO_PUBKEY) dai repository PPA di terze parti e le scarica dai server ufficiali per sbloccare gli aggiornamenti di sistema."));
         ui.add_space(3.0);
 
-        if ui::primary_button(ui, t("Correggi chiavi GPG mancanti"), !self.busy).clicked() {
+        if ui::primary_button(ui, t("Correggi chiavi GPG mancanti"), self.action_enabled()).clicked() {
             let script = crate::solutions::fix_missing_gpg_keys_script(); // <-- Modifica qui
             let job = crate::cmd_job("fixer", script, true);
             self.spawn_snapshot(ctx, job);
@@ -728,7 +725,7 @@ ui.add_space(3.0);
 
     // ----- Kernel / Grub / Recovery
     pub(crate) fn ui_kernel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "Kernel, Grub e Recovery");
+        ui::title(ui, t("Kernel, Grub e Recovery"));
         ui::sub_tabs(ui, &mut self.sub, &["Kernel manager", "Kernel e prestazioni", "Grub", "Recovery"]);
         match self.sub {
             0 => self.kernel_mgr(ui, ctx),
@@ -748,9 +745,9 @@ ui.add_space(3.0);
         }
         let sel: Vec<String> =
             self.kernels.iter().filter(|k| k.2 && !k.1 && valid_pkg(&k.0)).map(|k| k.0.clone()).collect();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui
-                .add_enabled(!self.busy && !sel.is_empty(), egui::Button::new(t("🗑 Rimuovi selezionati")))
+                .add_enabled(self.action_enabled() && !sel.is_empty(), egui::Button::new(t("🗑 Rimuovi selezionati")))
                 .clicked()
             {
                 let pk = sel.iter().map(|s| util::shq(s)).collect::<Vec<_>>().join(" ");
@@ -772,10 +769,10 @@ ui.add_space(3.0);
     fn kernel_perf(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::hint(
             ui,
-            "Il kernel è il cuore del sistema. Qui scegli come il processore bilancia velocità e consumi (governor) e quanto il sistema usa il disco al posto della RAM (swappiness). Se non sei sicuro, lascia i valori attuali.",
+            t("Il kernel è il cuore del sistema. Qui scegli come il processore bilancia velocità e consumi (governor) e quanto il sistema usa il disco al posto della RAM (swappiness). Se non sei sicuro, lascia i valori attuali."),
         );
         let avail = read_gov_avail();
-        ui.heading(t("Governor CPU"));
+        ui::section(ui, "⚙", "Governor CPU", "");
         if avail.is_empty() {
             ui.label(t("Gestione della frequenza non disponibile su questo sistema."));
         } else {
@@ -796,7 +793,7 @@ ui.add_space(3.0);
             });
         }
         ui.add_space(4.0);
-        ui.heading(t("Memoria virtuale (swappiness)"));
+        ui::section(ui, "◈", "Memoria virtuale (swappiness)", "");
         ui.add(egui::Slider::new(&mut self.swappiness, 0..=100).text(t("vm.swappiness")));
         let n = self.swappiness;
         let script = format!(
@@ -809,10 +806,10 @@ ui.add_space(3.0);
     fn grub_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::hint(
             ui,
-            "GRUB è il programma che parte per primo e avvia Debian. I «parametri di avvio» sono opzioni passate al sistema quando si accende. Usa «Anteprima» per vedere cosa cambierebbe prima di salvare; se non sei sicuro, non modificare nulla.",
+            t("GRUB è il programma che parte per primo e avvia Debian. I «parametri di avvio» sono opzioni passate al sistema quando si accende. Usa «Anteprima» per vedere cosa cambierebbe prima di salvare; se non sei sicuro, non modificare nulla."),
         );
         ui.label(t("Parametri di avvio (GRUB_CMDLINE_LINUX_DEFAULT):"));
-        ui.add(egui::TextEdit::singleline(&mut self.grub_line).desired_width(f32::INFINITY));
+        ui.add(egui::TextEdit::singleline(&mut self.grub_line).desired_width(ui::fit_width(ui, 520.0, 180.0)));
         let hw = format!("{} {}", self.info.gpu.join(" "), self.info.cpu.vendor).to_lowercase();
         let mut sugg: Vec<(&'static str, &'static str)> = vec![
             ("quiet", "Avvio silenzioso"),
@@ -852,7 +849,7 @@ ui.add_space(3.0);
             util::shq(clean_grub)
         );
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(valid, |ui| {
                 self.run_btn(
                     ui, ctx, t("💾 Salva e aggiorna GRUB"), "grub", &script, true,
@@ -875,7 +872,7 @@ ui.add_space(3.0);
             );
         });
         if !self.grub_preview.is_empty() {
-            ui.label(egui::RichText::new(t("Anteprima delle modifiche (non è stato cambiato nulla)")).strong().size(18.0));
+            ui::section_text(ui, "👁", t("Anteprima delle modifiche (non è stato cambiato nulla)"), "");
             ui::output_box(ui, &self.grub_preview, 280.0);
         }
         self.show_out(ui, "grub", 200.0);
@@ -884,7 +881,7 @@ ui.add_space(3.0);
     fn recovery_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::hint(
             ui,
-            "Strumenti di emergenza per quando qualcosa smette di funzionare: riavviano audio e rete, ricostruiscono il menu di avvio (GRUB) o ripristinano Flathub. Usali solo se hai un problema preciso.",
+            t("Strumenti di emergenza per quando qualcosa smette di funzionare: riavviano audio e rete, ricostruiscono il menu di avvio (GRUB) o ripristinano Flathub. Usali solo se hai un problema preciso."),
         );
         ui.horizontal_wrapped(|ui| {
             self.run_btn(
@@ -984,10 +981,10 @@ ui.add_space(3.0);
 
             ui.add_space(3.0);
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(!self.busy, egui::Button::new(t("🗑 Rimuovi selezionati"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🗑 Rimuovi selezionati"))).clicked() {
                     self.repo_action(false);
                 }
-                if ui.add_enabled(!self.busy, egui::Button::new(t("⛔ Disabilita selezionati"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("⛔ Disabilita selezionati"))).clicked() {
                     self.repo_action(true);
                 }
                 if ui.button(t("🔄 Rileggi sorgenti")).clicked() {
@@ -1012,7 +1009,7 @@ ui.add_space(3.0);
                 self.ui_repo_management(ui, ctx);
                 ui.add_space(3.0);
                 ui.label(t("Aggiungi un repository (riga completa, es. \"deb http://... suite componenti\"):"));
-                ui.add(egui::TextEdit::singleline(&mut self.repo_line).desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::singleline(&mut self.repo_line).desired_width(ui::fit_width(ui, 520.0, 180.0)));
                 let l = self.repo_line.trim().to_string();
                 let valid = (l.starts_with("deb ") || l.starts_with("deb-src ")) && !l.contains('\n');
                 let script = format!(
@@ -1027,10 +1024,12 @@ ui.add_space(3.0);
             }
             _ => {
                 let cn = codename();
-                ui.label(format!("{}: {}", t("Release rilevata"), if cn.is_empty() { "n/d" } else { &cn }));
+                let cn = if cn.is_empty() { t("n/d") } else { cn.as_str() };
+                ui.label(tf("Release rilevata: {}", &[&cn]));
                 let present = std::path::Path::new("/etc/apt/sources.list.d/debutility-backports.list").exists()
                     || std::path::Path::new("/etc/apt/sources.list.d/debclean-backports.list").exists();
-                ui.label(format!("Backports: {}", if present { t("abilitati da DebUtility") } else { t("non abilitati da DebUtility") }));
+                let backports = if present { t("abilitati da DebUtility") } else { t("non abilitati da DebUtility") };
+                ui.label(tf("Backports: {}", &[&backports]));
                 if cn.is_empty() || cn == "sid" || cn == "testing" || !cn.chars().all(|c| c.is_ascii_alphanumeric()) {
                     ui.label(t("I Backports non sono disponibili per questa release."));
                 } else {
@@ -1060,7 +1059,7 @@ ui.add_space(3.0);
         ui.label(egui::RichText::new(t("Rileva l'hardware del computer e propone i driver e i firmware da installare.")).size(18.0));
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("Rileva hardware e driver"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Rileva hardware e driver"), self.action_enabled()).clicked() {
                 self.spawn(ctx, |ch| {
                     ch.send(Msg::Log("▶ Rilevo l'hardware...".into()));
                     let (hw, props) = detect_drivers();
@@ -1126,7 +1125,7 @@ ui.add_space(3.0);
             });
             if !cn.is_empty()
                 && cn.chars().all(|c| c.is_ascii_alphanumeric())
-                && ui.add_enabled(!self.busy, egui::Button::new(t("Abilita contrib e non-free"))).clicked()
+                && ui.add_enabled(self.action_enabled(), egui::Button::new(t("Abilita contrib e non-free"))).clicked()
             {
                 let comps = if cn == "buster" || cn == "bullseye" {
                     "main contrib non-free"
@@ -1143,7 +1142,7 @@ ui.add_space(3.0);
                     let (hw, props) = detect_drivers();
                     ch.send(Msg::Drivers(hw, props));
                 });
-                self.confirm = Some(("Abilitare i componenti contrib e non-free di Debian?".into(), job));
+                self.confirm = Some((t("Abilitare i componenti contrib e non-free di Debian?").into(), job));
             }
             ui.add_space(3.0);
         }
@@ -1151,7 +1150,7 @@ ui.add_space(3.0);
         let sel: Vec<&'static str> =
             self.drv.iter().filter(|d| d.sel && d.available && !d.installed).map(|d| d.pkg).collect();
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, &format!("{} ({})", t("Installa selezionati"), sel.len()), !self.busy && !sel.is_empty()).clicked() {
+            if ui::primary_button(ui, &format!("{} ({})", t("Installa selezionati"), sel.len()), self.action_enabled() && !sel.is_empty()).clicked() {
                 let script = format!("apt-get -y install {}", sel.join(" "));
                 let n = sel.len();
                 let job: Job = Box::new(move |ch| {
@@ -1165,7 +1164,7 @@ ui.add_space(3.0);
             }
             if ui
                 .add_enabled(
-                    !self.busy && self.drv.iter().any(|d| d.recommended && d.available && !d.installed),
+                    self.action_enabled() && self.drv.iter().any(|d| d.recommended && d.available && !d.installed),
                     egui::Button::new(t("⭐ Seleziona consigliati")),
                 )
                 .clicked()
@@ -1198,9 +1197,9 @@ pub(crate) fn ui_startup(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
                 let mut filter_text = ui.data_mut(|d| {
                     d.get_temp::<String>(filter_id).unwrap_or_default()
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(t("Filtra:"));
-                    if ui.add(egui::TextEdit::singleline(&mut filter_text).desired_width(240.0)).changed() {
+                    if ui.add(egui::TextEdit::singleline(&mut filter_text).desired_width(ui::fit_width(ui, 240.0, 100.0))).changed() {
                         ui.data_mut(|d| d.insert_temp(filter_id, filter_text.clone()));
                     }
                     if !filter_text.is_empty() && ui.button(t("Pulisci")).clicked() {
@@ -1293,7 +1292,7 @@ pub(crate) fn ui_startup(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
             );
         }
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy && !cmds.is_empty(), egui::Button::new(t("✔ Applica modifiche"))).clicked() {
+            if ui.add_enabled(self.action_enabled() && !cmds.is_empty(), egui::Button::new(t("✔ Applica modifiche"))).clicked() {
                 let script = cmds.join("; ");
                 let job: Job = Box::new(move |ch| {
                     let (ok, out) = util::run_shell(&script, true);
@@ -1302,7 +1301,7 @@ pub(crate) fn ui_startup(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
                     ch.send(Msg::Groups(read_groups()));
                 });
                 self.confirm = Some((
-                    "Modificare i gruppi dell'utente? Serve un logout o un riavvio per renderle attive.".into(),
+                    t("Modificare i gruppi dell'utente? Serve un logout o un riavvio per renderle attive.").into(),
                     job,
                 ));
             }

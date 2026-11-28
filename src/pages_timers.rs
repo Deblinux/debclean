@@ -184,10 +184,10 @@ impl App {
             self.refresh_timers(ctx);
         }
 
-        ui::title(ui, "Pianificatore di Manutenzione");
+        ui::title(ui, t("Pianificatore di Manutenzione"));
         ui::hint(
             ui,
-            "Configura un'attività di sistema in background che avvia DebUtility in modalità headless alle ore impostate. L'esito e lo spazio liberato vengono salvati in un file di stato leggibile da questa scheda.",
+            t("Configura un'attività di sistema in background che avvia DebUtility in modalità headless alle ore impostate. L'esito e lo spazio liberato vengono salvati in un file di stato leggibile da questa scheda."),
         );
 
         let active = self
@@ -198,13 +198,8 @@ impl App {
         let mut action: Option<Action> = None;
 
         ui::card(ui, |ui| {
-            ui.label(
-                egui::RichText::new(t("Automazione con Timer Systemd"))
-                    .strong()
-                    .size(20.0)
-                    .color(ui::accent_text()),
-            );
-            ui.horizontal(|ui| {
+            ui::section(ui, "⏱", "Automazione con Timer Systemd", "");
+            ui.horizontal_wrapped(|ui| {
                 ui::led(
                     ui,
                     Some(active),
@@ -216,7 +211,7 @@ impl App {
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add_enabled(!self.busy, egui::Button::new(t("Aggiorna stato")))
+                        .add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna stato")))
                         .clicked()
                     {
                         // Il refresh reale viene eseguito dopo il frame: qui
@@ -311,7 +306,7 @@ impl App {
         let mut freq = self.timer_freq.min(ts::FREQUENCIES.len() - 1);
         let mut include = self.timer_includes.clone();
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Configurazione")).strong().size(18.0));
+            ui::section(ui, "⚙", "Configurazione", "");
             ui.add_space(2.0);
             egui::ComboBox::from_label(t("Frequenza"))
                 .selected_text(t(ts::FREQUENCIES[freq].1))
@@ -371,24 +366,24 @@ impl App {
         self.timer_includes = include;
 
         ui.horizontal_wrapped(|ui| {
-            if ui::primary_button(ui, if active { t("Aggiorna pianificazione") } else { t("Salva e attiva") }, !self.busy).clicked() {
+            if ui::primary_button(ui, if active { t("Aggiorna pianificazione") } else { t("Salva e attiva") }, self.action_enabled()).clicked() {
                 action = Some(Action::Apply);
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Salva impostazioni"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Salva impostazioni"))).clicked() {
                 action = Some(Action::Save);
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Esegui test ora"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Esegui test ora"))).clicked() {
                 action = Some(Action::Test);
             }
             if active
                 && ui
-                    .add_enabled(!self.busy, egui::Button::new(t("Disattiva pianificazione")))
+                    .add_enabled(self.action_enabled(), egui::Button::new(t("Disattiva pianificazione")))
                     .clicked()
             {
                 action = Some(Action::Disable);
             }
             if ui
-                .add_enabled(!self.busy, egui::Button::new(t("Rimuovi pianificazione")))
+                .add_enabled(self.action_enabled(), egui::Button::new(t("Rimuovi pianificazione")))
                 .clicked()
             {
                 action = Some(Action::Remove);
@@ -474,8 +469,8 @@ impl App {
         }
 
         ui.add_space(5.0);
-        ui.heading(t("Timer attivi nel sistema"));
-        ui.horizontal(|ui| {
+        ui::section(ui, "◷", "Timer attivi nel sistema", "");
+        ui.horizontal_wrapped(|ui| {
             self.run_btn(ui, ctx, t("Mostra tutti i timer utente"), "timers", "systemctl --user list-timers --all", false, None);
             self.run_btn(ui, ctx, t("Stato timer TRIM SSD (root)"), "timers", "systemctl status fstrim.timer", false, None);
         });

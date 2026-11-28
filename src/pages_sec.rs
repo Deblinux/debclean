@@ -1,3 +1,4 @@
+use crate::config_parsers;
 use crate::i18n::{self, t, tf, tr};
 use crate::{restore_delete_job, restore_scan_job, ui, util, App, Msg};
 use eframe::egui;
@@ -116,16 +117,16 @@ fn canonical_apt_source(path: &str) -> Option<PathBuf> {
 impl App {
     // ----- Sicurezza e firewall
 pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "Sicurezza e firewall");
+        ui::title(ui, t("Sicurezza e firewall"));
         ui::sub_tabs(
             ui,
             &mut self.sub,
             &["Firewall UFW", "Audit permessi", "Chiavi SSH", "Scanner Rootkit"],
         );
-        
+
         match self.sub {
             0 => {
-                ui.label(t("UFW blocca i tentativi di accesso non autorizzati dalla rete."));
+                ui::hint(ui, t("UFW blocca i tentativi di accesso non autorizzati dalla rete."));
                 let pre = "command -v ufw >/dev/null 2>&1 || { echo 'UFW non installato: usa il pulsante Installa UFW'; exit 1; }; ";
                 ui.horizontal_wrapped(|ui| {
                     self.run_btn(ui, ctx, t("Stato"), "ufw", &format!("{pre}ufw status verbose"), true, None);
@@ -163,11 +164,11 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             );
                 ui.horizontal(|ui| {
                     ui.label(t("Sorgente:  "));
-                    ui.add(egui::TextEdit::singleline(&mut self.backup_src).desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.backup_src).desired_width(ui::fit_width(ui, 420.0, 160.0)));
                 });
                 ui.horizontal(|ui| {
                     ui.label(t("Destinazione:"));
-                    ui.add(egui::TextEdit::singleline(&mut self.backup_dst).desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.backup_dst).desired_width(ui::fit_width(ui, 420.0, 160.0)));
                 });
                 let src = util::shq(self.backup_src.trim().trim_end_matches('/'));
                 let dst = util::shq(self.backup_dst.trim());
@@ -186,7 +187,7 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             );
                 ui.horizontal(|ui| {
                     ui.label(t("Cartella dei backup:"));
-                    ui.add(egui::TextEdit::singleline(&mut self.backup_dst).desired_width(f32::INFINITY));
+                    ui.add(egui::TextEdit::singleline(&mut self.backup_dst).desired_width(ui::fit_width(ui, 420.0, 160.0)));
                 });
                 ui.horizontal_wrapped(|ui| {
                     self.run_btn(
@@ -217,14 +218,14 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                     "Qui vedi gli snapshot di Timeshift e le cartelle di ripristino presenti sul sistema. Puoi selezionarne uno o più oppure rimuoverli tutti: prima della cancellazione viene chiesta conferma e l'operazione usa pkexec. Premi «Aggiorna elenco» per cercare i punti disponibili.",
                 );
                 ui.horizontal_wrapped(|ui| {
-                    if ui.add_enabled(!self.busy, egui::Button::new(t("🔄 Aggiorna elenco"))).clicked() {
+                    if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔄 Aggiorna elenco"))).clicked() {
                         self.restore_msg = None;
                         self.spawn(ctx, restore_scan_job());
                     }
-                    if ui.add_enabled(!self.busy && !self.restore_points.is_empty(), egui::Button::new(t("☑ Seleziona tutto"))).clicked() {
+                    if ui.add_enabled(self.action_enabled() && !self.restore_points.is_empty(), egui::Button::new(t("☑ Seleziona tutto"))).clicked() {
                         self.restore_selected = self.restore_points.iter().map(|p| p.id.clone()).collect();
                     }
-                    if ui.add_enabled(!self.busy && !self.restore_selected.is_empty(), egui::Button::new(t("☐ Deseleziona tutto"))).clicked() {
+                    if ui.add_enabled(self.action_enabled() && !self.restore_selected.is_empty(), egui::Button::new(t("☐ Deseleziona tutto"))).clicked() {
                         self.restore_selected.clear();
                     }
                 });
@@ -253,7 +254,9 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                             .show(ui, |ui| {
                                 egui::Grid::new("restore_points_grid")
                                     .num_columns(5)
-                                    .spacing([10.0, 4.0])
+                                    .min_col_width(0.0)
+                                    .max_col_width((ui.available_width() * 0.34).max(80.0))
+                                    .spacing([6.0, 4.0])
                                     .striped(true)
                                     .show(ui, |ui| {
                                         ui.strong(t("Selez."));
@@ -303,7 +306,7 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                 ui.horizontal_wrapped(|ui| {
                     let count = self.restore_selected.len();
                     let label = tf("🗑 Rimuovi selezionati ({})", &[&count]);
-                    if ui.add_enabled(!self.busy && count > 0, egui::Button::new(label)).clicked() {
+                    if ui.add_enabled(self.action_enabled() && count > 0, egui::Button::new(label)).clicked() {
                         let chosen: Vec<_> = self.restore_points
                             .iter()
                             .filter(|p| self.restore_selected.contains(&p.id))
@@ -315,7 +318,7 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                         );
                         self.confirm = Some((text, restore_delete_job(chosen)));
                     }
-                    if ui.add_enabled(!self.busy && !self.restore_points.is_empty(), egui::Button::new(t("🗑 Rimuovi tutto"))).clicked() {
+                    if ui.add_enabled(self.action_enabled() && !self.restore_points.is_empty(), egui::Button::new(t("🗑 Rimuovi tutto"))).clicked() {
                         let all = self.restore_points.clone();
                         let text = tf(
                             "Rimuovere TUTTI i {} punti di ripristino? L'operazione è irreversibile e richiede l'autorizzazione di amministratore.",
@@ -395,12 +398,12 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.label(t("Sovrascrive più volte il file con dati casuali e zeri, poi lo elimina. L'operazione è irreversibile."));
         ui.add_space(2.0);
         ui.label(egui::RichText::new(t("File e cartelle da distruggere (uno per riga):")).strong());
-        ui.add(egui::TextEdit::multiline(&mut self.shred_path).desired_rows(4).desired_width(f32::INFINITY));
+        ui.add(egui::TextEdit::multiline(&mut self.shred_path).desired_rows(4).desired_width(ui::fit_width(ui, 420.0, 160.0)));
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("📄 Scegli file..."))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("📄 Scegli file..."))).clicked() {
                 self.bg(ctx, |ch| ch.send(Msg::Picked(util::pick_paths(false))));
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("📁 Scegli cartella..."))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("📁 Scegli cartella..."))).clicked() {
                 self.bg(ctx, |ch| ch.send(Msg::Picked(util::pick_paths(true))));
             }
             if ui.button(t("Svuota elenco")).clicked() {
@@ -445,7 +448,7 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             "for P in {list}; do if [ -d \"$P\" ]; then find \"$P\" -type f -exec shred -n {n} -z -u {{}} + && rm -rf \"$P\"; else shred -v -n {n} -z -u \"$P\"; fi; done; echo 'Distruzione completata'"
         );
         ui.add_space(2.0);
-        if ui.add_enabled(safe && !self.busy, egui::Button::new(t("🗑 Distruggi"))).clicked() {
+        if ui.add_enabled(safe && self.action_enabled(), egui::Button::new(t("🗑 Distruggi"))).clicked() {
             let job = crate::cmd_job("shred", script, false);
             let msg = tf("Distruggere DEFINITIVAMENTE {} elementi? Non sarà possibile recuperarli.", &[&paths.len()]);
             self.confirm = Some((msg, job));
@@ -462,11 +465,12 @@ pub(crate) fn ui_firewall(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::title(ui, "Impostazioni");
         ui.heading(t("Lingua"));
         let mut lang = self.cfg.lang;
+        // Lingue e nomi arrivano da lang/langs.tsv: nessun indice o conteggio hardcoded.
         egui::ComboBox::from_label(t("Lingua dell'interfaccia"))
-            .selected_text(i18n::LANGS[lang].1)
+            .selected_text(i18n::name_of(lang))
             .show_ui(ui, |ui| {
-                for (i, (_, name)) in i18n::LANGS.iter().enumerate() {
-                    ui.selectable_value(&mut lang, i, *name);
+                for (i, _) in i18n::langs().iter().enumerate() {
+                    ui.selectable_value(&mut lang, i, i18n::name_of(i));
                 }
             });
         if lang != self.cfg.lang {
@@ -565,7 +569,7 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
     );
 
     ui.add_space(3.0);
-    if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Scansiona kernel e spazio"))).clicked() {
+    if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Scansiona kernel e spazio"))).clicked() {
         self.spawn(ctx, move |ch| {
             ch.send(Msg::Log("▶ Scansione kernel installati e calcolo spazio su disco...".into()));
             let running = std::process::Command::new("uname")
@@ -630,7 +634,7 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
     let total_bytes: u64 = self.orphan_kernels.iter().map(|(_, b, _)| *b).sum();
 
     ui::card(ui, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(t("Spazio liberabile selezionato:")).strong().size(16.0));
             let mb = selected_bytes as f64 / (1024.0 * 1024.0);
             let gb = selected_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
@@ -647,7 +651,12 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         } else {
             0.0
         };
-        ui.add(egui::ProgressBar::new(frac).text(t("Quota spazio kernel selezionato")));
+        ui.add(
+            ui::bar(frac)
+                .fill(ui::ACCENT)
+                .desired_width(ui.available_width())
+                .text(t("Quota spazio kernel selezionato")),
+        );
     });
 
     ui.add_space(4.0);
@@ -657,7 +666,7 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         } else {
             for (ver, bytes, sel) in &mut self.orphan_kernels {
                 let mb = *bytes as f64 / (1024.0 * 1024.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.checkbox(sel, egui::RichText::new(ver.as_str()).strong());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(format!("{mb:.1} MB")).color(ui::accent_text()));
@@ -703,7 +712,7 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
 
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔄 Aggiorna connessioni"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔄 Aggiorna connessioni"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     ch.send(Msg::Log("▶ Lettura socket TCP/UDP attive e processi associati...".into()));
                     let out = std::process::Command::new("sh")
@@ -747,7 +756,7 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                                 .iter()
                                 .find(|c| c.contains("users:(") || c.contains('/'))
                                 .copied()
-                                .unwrap_or("sconosciuto / permessi limitati")
+                                .unwrap_or(t("sconosciuto / permessi limitati"))
                                 .to_string();
                             rows.push((proto, state, local, remote, proc_col));
                         }
@@ -797,7 +806,9 @@ pub fn ui_orphan_kernels(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                 egui::ScrollArea::vertical().id_salt("net_sockets_scroll").max_height(195.0).show(ui, |ui| {
                     egui::Grid::new("net_sockets_grid")
                         .num_columns(5)
-                        .spacing([12.0, 4.0])
+                        .min_col_width(0.0)
+                        .max_col_width((ui.available_width() * 0.30).max(70.0))
+                        .spacing([6.0, 4.0])
                         .striped(true)
                         .show(ui, |ui| {
                             ui.strong(t("Proto"));
@@ -831,7 +842,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
 
     ui.add_space(3.0);
     ui.horizontal(|ui| {
-        if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Verifica chiavi GPG"))).clicked() {
+        if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Verifica chiavi GPG"))).clicked() {
             self.spawn(ctx, move |ch| {
                 ch.send(Msg::Log("▶ Scansione chiavi GPG di repository e PPA in corso...".into()));
                 let now_epoch: i64 = std::time::SystemTime::now()
@@ -1021,7 +1032,9 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             egui::ScrollArea::both().id_salt("gpg_keys_scroll").max_height(185.0).show(ui, |ui| {
                 egui::Grid::new("gpg_keys_grid")
                     .num_columns(5)
-                    .spacing([12.0, 5.0])
+                    .min_col_width(0.0)
+                    .max_col_width((ui.available_width() * 0.32).max(80.0))
+                    .spacing([6.0, 5.0])
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong(t("Stato"));
@@ -1044,7 +1057,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
 
                             if status == "EXPIRED" || status == "EXPIRING" {
                                 ui.horizontal(|ui| {
-                                    if ui.add_enabled(!self.busy, egui::Button::new(t("Rinnova"))).clicked() {
+                                    if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Rinnova"))).clicked() {
                                         let qk = util::shq(kid);
                                         renew_single_script = Some(format!(
                                             "KS_LIST='hkps://keyserver.ubuntu.com:443 hkps://keys.openpgp.org hkps://pgp.mit.edu'; \
@@ -1077,7 +1090,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                                             apt-get update"
                                         ));
                                     }
-                                    if ui.add_enabled(!self.busy, egui::Button::new(t("Disabilita"))).clicked() {
+                                    if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Disabilita"))).clicked() {
                                         let qp = util::shq(src_path);
                                         // Solo cifre esadecimali: viene interpolato in un programma awk.
                                         let kid_hex: String = kid
@@ -1170,7 +1183,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                     for (fname, dis_path, active_path) in &disabled_keys {
                         ui.label(egui::RichText::new(fname.as_str()).monospace());
                         ui.label(egui::RichText::new(dis_path.as_str()).color(ui::text_dim()));
-                        if ui.add_enabled(!self.busy, egui::Button::new(t("Riabilita"))).clicked() {
+                        if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Riabilita"))).clicked() {
                             let qf = util::shq(fname);
                             let qdis = util::shq(dis_path);
                             let qact = util::shq(active_path);
@@ -1217,7 +1230,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
 
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Scansiona repository APT"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Scansiona repository APT"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     ch.send(Msg::Log("▶ Scansione sorgenti APT in /etc/apt/sources.list*...".into()));
 
@@ -1260,15 +1273,12 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                             }
 
                             // Righe commentate con #
-                            if trimmed.starts_with('#') {
-                                let unhashed = trimmed.trim_start_matches('#').trim();
-                            if unhashed.starts_with("deb ") || unhashed.starts_with("deb-src ") || unhashed.starts_with("URIs:") {
-                                    issues += 1;
-                                    let line_msg = format!("⚠ [DISABILITATO] {fstr}:{line_no} -> {trimmed}");
-                                    report.push_str(&line_msg);
-                                    report.push('\n');
-                                    ch.send(Msg::Log(line_msg));
-                                }
+                            if config_parsers::is_disabled_repo_line(trimmed) {
+                                issues += 1;
+                                let line_msg = tf("⚠ [DISABILITATO] {}:{} -> {}", &[&fstr, &line_no, &trimmed]);
+                                report.push_str(&line_msg);
+                                report.push('\n');
+                                ch.send(Msg::Log(line_msg));
                                 continue;
                             }
 
@@ -1280,9 +1290,9 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                                     .next()
                                     .unwrap_or("")
                                     .trim();
-                            if key_path.is_empty() || !std::path::Path::new(key_path).is_file() {
+                                if key_path.is_empty() || !std::path::Path::new(key_path).is_file() {
                                     issues += 1;
-                                    let line_msg = format!("✘ [SIGNED-BY ROTTO] {fstr}:{line_no} -> file mancante: {key_path}");
+                                    let line_msg = tf("✘ [SIGNED-BY ROTTO] {}:{} -> file mancante: {}", &[&fstr, &line_no, &key_path]);
                                     report.push_str(&line_msg);
                                     report.push('\n');
                                     ch.send(Msg::Log(line_msg));
@@ -1294,7 +1304,7 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                                         .unwrap_or(false);
                                     if !ok {
                                         issues += 1;
-                                        let line_msg = format!("✘ [KEYRING NON VALIDO] {fstr}:{line_no} -> {key_path}");
+                                        let line_msg = tf("✘ [KEYRING NON VALIDO] {}:{} -> {}", &[&fstr, &line_no, &key_path]);
                                         report.push_str(&line_msg);
                                         report.push('\n');
                                         ch.send(Msg::Log(line_msg));
@@ -1303,34 +1313,22 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                             }
 
                             // Estrai chiave normalizzata per rilevare duplicati
-                            let norm_repo = if trimmed.starts_with("deb ") || trimmed.starts_with("deb-src ") {
-                                let without_opts = if let Some(rb) = trimmed.find(']') {
-                                    trimmed[rb + 1..].trim()
-                                } else {
-                                    trimmed.trim_start_matches("deb-src ").trim_start_matches("deb ").trim()
-                                };
-                                Some(without_opts.to_string())
-                            } else if trimmed.starts_with("URIs:") {
-                                Some(trimmed.trim_start_matches("URIs:").trim().to_string())
-                            } else {
-                                None
-                            };
+                            let norm_repo = config_parsers::normalize_repo_line(trimmed);
 
-                        if let Some(repo_key) = norm_repo {
+                            if let Some(repo_key) = norm_repo {
                                 if !seen_repos.insert(repo_key.clone()) {
                                     issues += 1;
-                                    let line_msg = format!("⚠ [DUPLICATO] {fstr}:{line_no} -> {repo_key}");
+                                    let line_msg = tf("⚠ [DUPLICATO] {}:{} -> {}", &[&fstr, &line_no, &repo_key]);
                                     report.push_str(&line_msg);
                                     report.push('\n');
                                     ch.send(Msg::Log(line_msg));
                                 }
                             }
-                        
                         }
                     }
 
                     if issues == 0 {
-                        let ok_msg = "✔ Nessuna anomalia rilevata nei file sorgente APT.";
+                        let ok_msg = t("✔ Nessuna anomalia rilevata nei file sorgente APT.");
                         report.push_str(ok_msg);
                         report.push('\n');
                         ch.send(Msg::Log(ok_msg.into()));
@@ -1352,28 +1350,28 @@ pub fn ui_gpg_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.strong(t("Intervento rapido su file o riga sorgente APT"));
             ui.add_space(3.0);
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("File sorgente:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.apt_audit_file)
-                        .desired_width(320.0)
-                        .hint_text("/etc/apt/sources.list.d/esempio.list"),
+                        .desired_width(ui::fit_width(ui, 320.0, 120.0))
+                        .hint_text(t("/etc/apt/sources.list.d/esempio.list")),
                 );
             });
             ui.add_space(2.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("Pattern / Riga:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.apt_audit_pattern)
-                        .desired_width(320.0)
-                        .hint_text("es. ppa.launchpadcontent.net o buster"),
+                        .desired_width(ui::fit_width(ui, 320.0, 120.0))
+                        .hint_text(t("es. ppa.launchpadcontent.net o buster")),
                 );
             });
 
             let f_trimmed = self.apt_audit_file.trim();
             let p_trimmed = self.apt_audit_pattern.trim();
             let valid_path = canonical_apt_source(f_trimmed);
-            let can_act = valid_path.is_some() && !p_trimmed.is_empty() && !self.busy;
+            let can_act = valid_path.is_some() && !p_trimmed.is_empty() && self.action_enabled();
             let canon_file = valid_path
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())

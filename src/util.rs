@@ -333,6 +333,27 @@ pub fn legacy_state_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Percorso della copia `.bak` di un file: il suffisso viene aggiunto al nome
+/// completo, come fa `cp -p -n -- "$file" "$file.bak"` nella UI.
+pub fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".bak");
+    PathBuf::from(name)
+}
+
+/// Crea una copia di sicurezza `.bak` senza sovrascrivere quella esistente
+/// (stessa semantica di `cp -n`). Usata quando DebUtility gira già come root;
+/// negli altri casi la copia avviene dentro il job privilegiato.
+pub fn create_backup(path: &Path) -> Result<PathBuf, String> {
+    let backup = backup_path(path);
+    if std::fs::symlink_metadata(&backup).is_ok() {
+        return Ok(backup);
+    }
+    std::fs::copy(path, &backup)
+        .map_err(|e| format!("Impossibile creare il backup {}: {e}", backup.display()))?;
+    Ok(backup)
+}
+
 /// Scrive un file in modo atomico (scrittura temporanea + rename).
 pub fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));

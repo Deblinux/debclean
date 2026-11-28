@@ -68,7 +68,7 @@ pub fn integrate_appimage(item: &AppImageItem) -> Result<(), String> {
         let _ = fs::set_permissions(&item.path, perms);
     }
 
-    let p_str = item.path.to_str().ok_or("Percorso non valido")?;
+    let p_str = item.path.to_str().ok_or(t("Percorso non valido"))?;
     let content = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
@@ -87,9 +87,9 @@ pub fn integrate_appimage(item: &AppImageItem) -> Result<(), String> {
 
 impl App {
     pub(crate) fn ui_appimages(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        ui::title(ui, "AppImage");
+        ui::title(ui, t("AppImage"));
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Gestione AppImage")).strong().size(20.0));
+            ui::section(ui, "◆", "Gestione AppImage", "");
             ui.label(t("Rileva le applicazioni AppImage in ~/Applications, ~/AppImages o ~/.local/bin e le integra nel menu delle applicazioni di sistema."));
         });
         ui.add_space(3.0);
@@ -104,10 +104,10 @@ impl App {
 
         for item in items {
             ui::card(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&item.name).strong().size(18.0));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new(&item.name).strong().size(18.0).color(ui::text_primary()));
                     if item.is_integrated {
-                        ui.colored_label(ui::semantic_text(ui::GOOD), t("nel menu"));
+                        ui::pill(ui, t("nel menu"), ui::GOOD);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if item.is_integrated {

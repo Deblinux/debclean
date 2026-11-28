@@ -34,11 +34,11 @@ impl DiskCategory {
 
     pub fn label(self) -> &'static str {
         match self {
-            DiskCategory::Media => "Video/Media",
-            DiskCategory::Archive => "Archivi/ISO",
-            DiskCategory::Development => "Sviluppo/Build",
-            DiskCategory::Documents => "Documenti",
-            DiskCategory::System => "Sistema/Altro",
+            DiskCategory::Media => t("Video/Media"),
+            DiskCategory::Archive => t("Archivi/ISO"),
+            DiskCategory::Development => t("Sviluppo/Build"),
+            DiskCategory::Documents => t("Documenti"),
+            DiskCategory::System => t("Sistema/Altro"),
         }
     }
 }

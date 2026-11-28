@@ -381,12 +381,12 @@ impl App {
                 });
             });
             ui.add_space(3.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(t("Aggiorna elenco")).clicked() {
                     self.refresh_quarantine();
                 }
                 if ui
-                    .add_enabled(!self.busy, egui::Button::new(t("Elimina elementi scaduti")))
+                    .add_enabled(self.action_enabled(), egui::Button::new(t("Elimina elementi scaduti")))
                     .clicked()
                 {
                     self.spawn(ctx, move |ch: &Chan| {
@@ -444,7 +444,7 @@ impl App {
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
             for item in &self.quarantine_items {
                 ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let left = days_left(item);
                         if left == 0 {
                             ui::led(ui, Some(false), t("Scaduto"));
@@ -483,24 +483,15 @@ impl App {
                             ui::kv(ui, "Dimensione", &cleaner::fmt_bytes(item.size));
                         });
                     ui.add_space(3.0);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui
-                            .add_enabled(!self.busy, egui::Button::new(t("Ripristina")))
+                            .add_enabled(self.action_enabled(), egui::Button::new(t("Ripristina")))
                             .on_hover_text(t("Riporta il file nel percorso originale"))
                             .clicked()
                         {
                             restore_id = Some(item.id.clone());
                         }
-                        if ui
-                            .add_enabled(
-                                !self.busy,
-                                egui::Button::new(
-                                    egui::RichText::new(t("Elimina definitivamente"))
-                                        .strong()
-                                        .color(egui::Color32::WHITE),
-                                )
-                                .fill(ui::BAD),
-                            )
+                        if ui::danger_button(ui, t("Elimina definitivamente"), self.action_enabled())
                             .on_hover_text(t("Elimina il file dalla quarantena senza possibilità di recupero"))
                             .clicked()
                         {

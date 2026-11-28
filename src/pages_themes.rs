@@ -21,9 +21,9 @@ pub enum ThemeType {
 impl ThemeType {
     pub fn label(&self) -> &'static str {
         match self {
-            ThemeType::Font => "Font (Caratteri)",
-            ThemeType::Icon => "Icone",
-            ThemeType::Theme => "Tema GTK / Cursore",
+            ThemeType::Font => t("Font (Caratteri)"),
+            ThemeType::Icon => t("Icone"),
+            ThemeType::Theme => t("Tema GTK / Cursore"),
         }
     }
 }
@@ -239,7 +239,7 @@ impl App {
                 self.theme_items = items;
                 self.log.push_str("✔ Scansione font, icone e temi utente completata.\n");
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Installa nuovo Font/Tema..."))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Installa nuovo Font/Tema..."))).clicked() {
                 let ctx_c = ctx.clone();
                 let tx_c = self.tx.clone();
                 std::thread::spawn(move || {
@@ -286,14 +286,14 @@ impl App {
                             };
                             ui.label(icon);
                             ui.label(egui::RichText::new(&item.name).strong().size(15.0));
-                            ui.label(egui::RichText::new(format!("[{}]", item.item_type.label())).color(ui::text_dim()));
+                            ui.label(egui::RichText::new(format!("[{}]", t(item.item_type.label()))).color(ui::text_dim()));
                         });
                         ui.add_space(2.0);
                     }
                 });
 
                 ui.add_space(4.0);
-                if ui::primary_button(ui, t("Rimuovi elementi selezionati"), !self.busy).clicked() {
+                if ui::primary_button(ui, t("Rimuovi elementi selezionati"), self.action_enabled()).clicked() {
                     let targets: Vec<CustomItem> = self.theme_items.iter().filter(|i| i.selected).cloned().collect();
                     if !targets.is_empty() {
                         let job: Job = Box::new(move |ch: &Chan| {

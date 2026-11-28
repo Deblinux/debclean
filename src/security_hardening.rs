@@ -4,7 +4,7 @@ use eframe::egui;
 
 impl App {
     pub(crate) fn ui_security_hardening(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "Blindatura & Security Hardening");
+        ui::title(ui, t("Blindatura & Security Hardening"));
         ui::card(ui, |ui| {
             ui.label(
                 egui::RichText::new(t("Applica best-practice di sicurezza enterprise per blindare il kernel Linux, proteggere la rete contro attacchi comuni (SYN flood, spoofing), verificare i permessi critici e controllare le porte aperte."))
@@ -16,7 +16,7 @@ impl App {
         
         // 1. Blocco Hardening Kernel & Rete
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("🔐 Hardening Kernel & Parametri di Rete (Sysctl)")).strong().size(18.0).color(ui::semantic_text(ui::WARN)));
+            ui::section_text(ui, "▣", t("🔐 Hardening Kernel & Parametri di Rete (Sysctl)"), "");
             ui.label(t("Applica parametri di sicurezza avanzati per prevenire SYN flood, IP spoofing, limitare i dump di memoria e proteggere il routing. Verrà creato un file di configurazione persistente in /etc/sysctl.d/99-debutility-hardening.conf."));
             ui.add_space(3.0);
 
@@ -71,7 +71,7 @@ sysctl -n net.ipv4.tcp_syncookies net.ipv4.conf.all.rp_filter fs.protected_symli
 
         // 2. Controllo Permessi File Critici
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("📂 Verifica Permessi File Critici")).strong().size(18.0).color(ui::accent_text()));
+            ui::section_text(ui, "▣", t("📂 Verifica Permessi File Critici"), "");
             ui.label(t("Controlla che i file di sistema cruciali (/etc/passwd, /etc/shadow, /etc/sudoers) abbiano i permessi corretti e non siano modificabili da utenti non autorizzati."));
             ui.add_space(3.0);
 
@@ -110,7 +110,7 @@ sysctl -n net.ipv4.tcp_syncookies net.ipv4.conf.all.rp_filter fs.protected_symli
 
         // 3. Porte Aperte e Servizi di Rete
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("🌐 Analisi Porte Locali e Servizi in Ascolto")).strong().size(18.0).color(ui::semantic_text(ui::GOOD)));
+            ui::section_text(ui, "▣", t("🌐 Analisi Porte Locali e Servizi in Ascolto"), "");
             ui.label(t("Elenca tutte le porte di rete aperte sul computer e i relativi programmi associati, per identificare eventuali servizi esposti non necessari."));
             ui.add_space(3.0);
 

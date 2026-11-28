@@ -129,11 +129,14 @@ fn desktop_dirs() -> Vec<PathBuf> {
 fn desktop_value(content: &str, key: &str) -> String {
     let exact_prefix = format!("{key}=");
     let localized_prefix = format!("{key}[");
-    let lang = crate::i18n::code_of(crate::i18n::lang());
+    // Catena ordinata del locale attivo (es. pt_BR -> pt): consente di usare
+    // anche le localizzazioni .desktop della lingua madre.
+    let codes = crate::i18n::locale_chain(crate::i18n::code_of(crate::i18n::lang()));
     let mut in_entry = false;
     let mut exact = String::new();
     let mut localized = String::new();
     let mut fallback = String::new();
+    let mut best_rank: Option<usize> = None;
 
     for line in content.lines() {
         let line = line.trim();
@@ -149,9 +152,14 @@ fn desktop_value(content: &str, key: &str) -> String {
         } else if let Some(rest) = line.strip_prefix(&localized_prefix) {
             if let Some((locale, value)) = rest.split_once("]=") {
                 let value = value.trim().to_string();
-                let loc = locale.to_ascii_lowercase();
-                if loc == lang || loc.starts_with(&format!("{lang}_")) || loc.starts_with(&format!("{lang}-")) {
-                    localized = value;
+                let loc = crate::i18n::locale_chain(locale);
+                let rank = codes.iter().position(|c| loc.iter().any(|x| x == c));
+                if let Some(r) = rank {
+                    // Il locale piu' specifico (primo nella catena) ha la priorita'.
+                    if best_rank.map_or(true, |best| r < best) {
+                        localized = value;
+                        best_rank = Some(r);
+                    }
                 } else if fallback.is_empty() {
                     fallback = value;
                 }
@@ -605,14 +613,18 @@ impl App {
             // modo nomi, comandi e pulsanti non vengono più schiacciati a metà.
             let column_gap = ui.spacing().item_spacing.x;
             let full_width = ui.available_width();
-            let left_width = 190.0f32.min((full_width - 280.0).max(120.0));
+            let left_width = if full_width < 520.0 {
+                110.0
+            } else {
+                190.0f32.min((full_width - 280.0).max(120.0))
+            };
             let right_width = (full_width - left_width - column_gap).max(1.0);
 
             // Altezza dell'elenco di destra: almeno 380 px, fino a 450 px quando
             // la finestra lo consente. La tabella mostra così molte voci per
             // volta, come il Menù principale di MATE, senza lasciare lo spazio
             // vuoto che si aveva sotto la prima riga.
-            let list_height = ui.available_height().clamp(380.0, 450.0);
+            let list_height = ui.available_height().clamp(220.0, 420.0);
 
             // Allineamento in alto: "Elementi" e "Cerca voce..." partono alla
             // stessa quota di "Menù" / "Tutti" nella colonna sinistra.
@@ -709,22 +721,24 @@ impl App {
                                 .max_height(list_height)
                                 .show(right, |ui| {
                                     let available = ui.available_width().max(1.0);
-                                    let gaps = (4.0 * ui.spacing().item_spacing.x).min(available * 0.24);
-                                    let cell_gap = gaps / 4.0; // 5 colonne => 4 spaziature
+                                    // Con poca larghezza si passa da 5 a 3 colonne:
+                                    // icona/categoria e comando finiscono sotto il nome
+                                    // (sempre con tooltip), così non diventano "…" da 20 px.
+                                    let compact_cols = available < 560.0;
+                                    let cols = if compact_cols { 3 } else { 5 };
+                                    let gaps = ((cols - 1) as f32 * ui.spacing().item_spacing.x).min(available * 0.24);
+                                    let cell_gap = gaps / (cols - 1) as f32;
 
-                                    // Larghezze fisse e compatte per i controlli: lo
-                                    // spazio rimanente va ai testi, troncati con ellissi
-                                    // e mostrati per intero nel tooltip al passaggio.
-                                    let show_w = 140.0f32.min(available * 0.40);
-                                    let actions_w = 104.0f32.min(available * 0.28);
+                                    let show_w = 140.0f32.min(available * (if compact_cols { 0.32 } else { 0.40 }));
+                                    let actions_w = 104.0f32.min(available * 0.24);
                                     let text_space = (available - gaps - show_w - actions_w).max(0.0);
-                                    let name_w = text_space * 0.34;
-                                    let icon_w = text_space * 0.20;
-                                    let command_w = (text_space - name_w - icon_w).max(0.0);
+                                    let name_w = if compact_cols { text_space } else { text_space * 0.34 };
+                                    let icon_w = if compact_cols { 0.0 } else { text_space * 0.20 };
+                                    let command_w = if compact_cols { 0.0 } else { (text_space - name_w - icon_w).max(0.0) };
                                     let table_width = show_w + name_w + icon_w + command_w + actions_w + gaps;
                                     ui.set_width(table_width);
                                     egui::Grid::new("menu_editor_items_grid")
-                                        .num_columns(5)
+                                        .num_columns(cols)
                                         .striped(true)
                                         .min_col_width(0.0)
                                         .spacing(egui::vec2(cell_gap, 4.0))
@@ -743,20 +757,22 @@ impl App {
                                                 egui::RichText::new(t("Nome")).strong().size(15.0),
                                                 false,
                                             );
-                                            let _ = ellipsis_label(
-                                                ui,
-                                                t("Icona / Categoria"),
-                                                icon_w,
-                                                egui::RichText::new(t("Icona / Categoria")).strong().size(15.0),
-                                                false,
-                                            );
-                                            let _ = ellipsis_label(
-                                                ui,
-                                                t("Comando"),
-                                                command_w,
-                                                egui::RichText::new(t("Comando")).strong().size(15.0),
-                                                false,
-                                            );
+                                            if !compact_cols {
+                                                let _ = ellipsis_label(
+                                                    ui,
+                                                    t("Icona / Categoria"),
+                                                    icon_w,
+                                                    egui::RichText::new(t("Icona / Categoria")).strong().size(15.0),
+                                                    false,
+                                                );
+                                                let _ = ellipsis_label(
+                                                    ui,
+                                                    t("Comando"),
+                                                    command_w,
+                                                    egui::RichText::new(t("Comando")).strong().size(15.0),
+                                                    false,
+                                                );
+                                            }
                                             let _ = ellipsis_label(
                                                 ui,
                                                 t("Azioni"),
@@ -807,40 +823,64 @@ impl App {
                                                             .size(12.5),
                                                         false,
                                                     );
+                                                    if compact_cols {
+                                                        let category = tr(&item.category);
+                                                        let detail = format!("{} · {}", item.icon, category);
+                                                        let _ = ellipsis_label(
+                                                            ui,
+                                                            detail.as_str(),
+                                                            name_w,
+                                                            egui::RichText::new(detail.as_str())
+                                                                .color(crate::ui::accent_text())
+                                                                .size(12.0),
+                                                            false,
+                                                        );
+                                                        let _ = ellipsis_label(
+                                                            ui,
+                                                            item.exec.as_str(),
+                                                            name_w,
+                                                            egui::RichText::new(item.exec.as_str())
+                                                                .monospace()
+                                                                .size(12.0),
+                                                            false,
+                                                        );
+                                                    }
                                                 });
 
-                                                ui.vertical(|ui| {
-                                                    ui.set_width(icon_w);
-                                                    let _ = ellipsis_label(
-                                                        ui,
-                                                        item.icon.as_str(),
-                                                        icon_w,
-                                                        egui::RichText::new(item.icon.as_str())
-                                                            .color(crate::ui::accent_text())
-                                                            .size(13.0),
-                                                        false,
-                                                    );
-                                                    let category = tr(&item.category);
-                                                    let _ = ellipsis_label(
-                                                        ui,
-                                                        category.as_str(),
-                                                        icon_w,
-                                                        egui::RichText::new(category.as_str())
-                                                            .color(crate::ui::text_dim())
-                                                            .size(13.0),
-                                                        false,
-                                                    );
-                                                });
+                                                if !compact_cols {
+                                                    ui.vertical(|ui| {
+                                                        ui.set_width(icon_w);
+                                                        let _ = ellipsis_label(
+                                                            ui,
+                                                            item.icon.as_str(),
+                                                            icon_w,
+                                                            egui::RichText::new(item.icon.as_str())
+                                                                .color(crate::ui::accent_text())
+                                                                .size(13.0),
+                                                            false,
+                                                        );
+                                                        let category = tr(&item.category);
+                                                        let _ = ellipsis_label(
+                                                            ui,
+                                                            category.as_str(),
+                                                            icon_w,
+                                                            egui::RichText::new(category.as_str())
+                                                                .color(crate::ui::text_dim())
+                                                                .size(13.0),
+                                                            false,
+                                                        );
+                                                    });
 
-                                                let _ = ellipsis_label(
-                                                    ui,
-                                                    item.exec.as_str(),
-                                                    command_w,
-                                                    egui::RichText::new(item.exec.as_str())
-                                                        .monospace()
-                                                        .size(13.5),
-                                                    false,
-                                                );
+                                                    let _ = ellipsis_label(
+                                                        ui,
+                                                        item.exec.as_str(),
+                                                        command_w,
+                                                        egui::RichText::new(item.exec.as_str())
+                                                            .monospace()
+                                                            .size(13.5),
+                                                        false,
+                                                    );
+                                                }
 
                                                 ui.horizontal(|ui| {
                                                     ui.set_width(actions_w);
@@ -992,10 +1032,7 @@ impl App {
             .map_err(|e| format!("tar non disponibile: {e}"))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            return Err(format!(
-                "Archivio non leggibile: {}",
-                crate::util::tail(&err, 2)
-            ));
+            return Err(tf("Archivio non leggibile: {}", &[&crate::util::tail(&err, 2)]));
         }
         Ok(String::from_utf8_lossy(&out.stdout)
             .lines()
@@ -1081,7 +1118,7 @@ impl App {
         {
             self.out.insert(
                 "menu_backup".into(),
-                tf("✘ Errore durante il ripristino del backup: {}", &[&format!("Archivio non valido: {bad}")]),
+                tf("✘ Errore durante il ripristino del backup: {}", &[&tf("Archivio non valido: {}", &[&bad])]),
             );
             return;
         }

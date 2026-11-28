@@ -1,4 +1,4 @@
-use crate::i18n::t;
+use crate::i18n::{t, tf};
 use crate::{ui, App};
 use eframe::egui;
 
@@ -76,6 +76,11 @@ const GUIDE: &[(&str, &[Entry])] = &[
                 "Livello di rischio: con cautela. Il ripristino non sovrascrive un file già presente nel percorso originale: se esiste, prima sposta o rinomina quel file. Dopo la scadenza i file vengono eliminati senza recupero; per operazioni su cartelle o su più file usa gli snapshot di Timeshift/Snapper, non questa scheda.",
             ),
             (
+                "Cronologia e ripristino",
+                "Riunisce in un unico elenco i backup delle sorgenti APT creati in /etc/apt/debutility-backups/, i file .bak di GRUB e dei file di sistema e le voci ancora presenti in Quarantena. Puoi filtrare per tipo, cercare per percorso o stato, ordinare per data e selezionare una voce per ripristinarla o eliminarla. La vista segnala quali voci richiedono autorizzazione di amministratore.",
+                "Il ripristino sovrascrive il file attuale con la copia salvata e, per GRUB, aggiorna la configurazione di avvio: la conferma è obbligatoria. L'eliminazione è definitiva. Se l'elenco in /etc non è leggibile, usa «Ricarica con privilegi»; un rifiuto della finestra pkexec lascia il sistema invariato e mostra un messaggio di annullamento.",
+            ),
+            (
                 "Pianificatore di manutenzione",
                 "Crea un timer systemd utente che avvia direttamente DebUtility in modalità headless (--clean --yes --json) ogni giorno, ogni settimana o una volta al mese alle 03:30. Puoi scegliere le categorie da includere: cache utente e dei browser, miniature, residui APT/Flatpak, log, file temporanei e file/cartelle vuote. La scheda mostra lo stato del timer, la prossima esecuzione, l'esito dell'ultima pulizia con lo spazio liberato e il log; «Esegui test ora» avvia subito il servizio senza aspettare la scadenza.",
                 "Le categorie contrassegnate con • richiedono l'autorizzazione di amministratore tramite pkexec durante l'esecuzione pianificata. Disattivando o rimuovendo la pianificazione vengono fermati sia il timer sia il servizio; l'ultimo log resta disponibile per la diagnosi.",
@@ -112,7 +117,7 @@ const GUIDE: &[(&str, &[Entry])] = &[
             ),
             (
                 "Storico APT",
-                "Analizza il registro di sistema (/var/log/apt/history.log) per mostrare l'elenco cronologico di tutte le transazioni APT eseguite. Per ogni operazione visualizza data, comando esatto e l'elenco dei pacchetti installati, aggiornati o rimossi.",
+                "Analizza il registro di sistema (/var/log/apt/history.log) per mostrare l'elenco cronologico di tutte le transazioni APT eseguite. Puoi filtrare rapidamente per data, comando o pacchetti, ordinare per data/ora o comando e vedere il contatore «X / Y» delle transazioni visibili. Per ogni operazione visualizza data, comando esatto, pacchetti toccati e l'eventuale annullamento.",
                 "",
             ),
             (
@@ -157,13 +162,13 @@ const GUIDE: &[(&str, &[Entry])] = &[
             ),
             (
                 "Processi",
-                "Elenca i programmi in esecuzione con la CPU e la memoria che usano. «Termina» chiede al programma di chiudersi, «Kill» lo chiude con la forza se non risponde.",
-                "Chiudere un processo di sistema può rendere instabile il computer.",
+                "Elenca i programmi in esecuzione con la CPU e la memoria che usano. Puoi filtrare rapidamente per nome, PID o utente, ordinare le colonne (PID, utente, CPU, memoria, comando) con indicatore ▲/▼ e selezionare più processi per terminarli o chiuderli con la forza in blocco. Il contatore «X / Y» mostra quanti elementi sono visibili rispetto al totale.",
+                "Chiudere un processo di sistema può rendere instabile il computer. Le azioni in blocco si applicano solo ai processi selezionati visibili.",
             ),
             (
                 "App installate",
-                "Elenca i pacchetti APT e le app Flatpak installati e permette di disinstallarli. Usa la ricerca per trovare subito quello che cerchi.",
-                "La disinstallazione chiede conferma ma non si può annullare.",
+                "Elenca i pacchetti APT e le app Flatpak installati e permette di disinstallarli. La ricerca filtra in tempo reale, le intestazioni Pacchetto e Versione sono ordinabili, e puoi selezionare più elementi con selezione/deselezione rapida per disinstallarli in un'unica conferma. Il contatore «X / Y» indica gli elementi filtrati rispetto al totale della scheda.",
+                "La disinstallazione chiede conferma ma non si può annullare. Nelle azioni multiple verifica bene la selezione prima di confermare.",
             ),
             (
                 "Container (Docker / Podman)",
@@ -368,7 +373,7 @@ impl App {
         ui::title(ui, t("Guida di DebUtility"));
         ui::card(ui, |ui| {
             ui.label(
-                egui::RichText::new(format!("DebUtility v{}", crate::APP_VERSION))
+                egui::RichText::new(tf("DebUtility v{}", &[&crate::APP_VERSION]))
                     .size(17.0)
                     .strong()
                     .color(ui::accent_text()),

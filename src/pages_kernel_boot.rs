@@ -252,22 +252,6 @@ pub fn scan_with<F: FnMut(f32, String)>(mut progress: F) -> Report {
 
 // ---- UI ---------------------------------------------------------------------------------------
 
-fn badge(ui: &mut egui::Ui, text: &str, tint: egui::Color32) {
-    egui::Frame::default()
-        .fill(ui::alpha(tint, if ui::is_dark() { 46 } else { 30 }))
-        .stroke(egui::Stroke::new(1.0_f32, ui::alpha(tint, 140)))
-        .rounding(6.0)
-        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .size(12.0)
-                    .strong()
-                    .color(ui::semantic_text(tint)),
-            );
-        });
-}
-
 impl App {
     /// Avvia la scansione in background con avanzamento condiviso.
     pub(crate) fn kb_scan(&mut self, ctx: &egui::Context) {
@@ -357,7 +341,7 @@ impl App {
         );
 
         let busy = self.busy;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.add_enabled(!busy, egui::Button::new(crate::i18n::t("Scansiona kernel e /boot"))).clicked() {
                 self.kb_scan(ctx);
             }
@@ -467,7 +451,7 @@ impl App {
 
                 for (idx, entry) in self.kb_report.kernels.iter_mut().enumerate() {
                     ui.push_id(format!("kb-kernel-{idx}"), |ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.add_enabled(
                                 !busy && !entry.protected,
                                 egui::Checkbox::new(
@@ -477,7 +461,7 @@ impl App {
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if entry.protected {
-                                    badge(ui, crate::i18n::t("In uso - Protetto"), ui::GOOD);
+                                    ui::pill(ui, crate::i18n::t("In uso - Protetto"), ui::GOOD);
                                 }
                                 ui.label(
                                     egui::RichText::new(cleaner::fmt_bytes(entry.size()))

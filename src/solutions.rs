@@ -20,6 +20,7 @@ const TOKENS: &[&[&[&str]]] = &[
     &[&["gpu hang"], &["gpu fault"], &["amdgpu", "error"], &["nouveau", "error"], &["drm", "error"]],
 ];
 
+// SOLUTIONS-BEGIN
 const TEXTS: &[(&str, &str)] = &[
     (
         "Memoria RAM esaurita: il sistema ha chiuso dei programmi",
@@ -82,6 +83,7 @@ const TEXTS: &[(&str, &str)] = &[
         "Installa i driver adatti in «Repository e driver» → «Driver manager» e aggiorna il sistema da «Aggiornamenti». Se il problema resta, prova ad avviare con un kernel diverso.",
     ),
 ];
+// SOLUTIONS-END
 
 const _: () = assert!(TOKENS.len() == TEXTS.len());
 
@@ -111,9 +113,9 @@ pub fn get_active_fixes(out: &str) -> Vec<CrashFixOption> {
 
     if lines.iter().any(|l| l.contains("out of memory") || l.contains("oom-killer")) {
         fixes.push(CrashFixOption {
-            problem_title: "Memoria RAM esaurita: il sistema ha chiuso dei programmi",
-            explanation: "Il kernel ha attivato l'OOM Killer. Ottimizziamo la swappiness e liberiamo la cache.",
-            fix_label: "Ottimizza RAM e Swappiness",
+            problem_title: t("Memoria RAM esaurita: il sistema ha chiuso dei programmi"),
+            explanation: t("Il kernel ha attivato l'OOM Killer. Ottimizziamo la swappiness e liberiamo la cache."),
+            fix_label: t("Ottimizza RAM e Swappiness"),
             fix_script: "sync; echo 3 > /proc/sys/vm/drop_caches; sysctl -w vm.swappiness=20 && echo 'vm.swappiness=20' > /etc/sysctl.d/99-debutility-oom.conf && echo '✔ Memoria ottimizzata'",
             needs_root: true,
         });
@@ -121,9 +123,9 @@ pub fn get_active_fixes(out: &str) -> Vec<CrashFixOption> {
 
     if lines.iter().any(|l| l.contains("failed to start") || l.contains("entered failed state")) {
         fixes.push(CrashFixOption {
-            problem_title: "Un servizio di sistema non si è avviato",
-            explanation: "Uno o più servizi systemd sono in errore. Possiamo azzerare lo stato di errore.",
-            fix_label: "Resetta servizi systemd falliti",
+            problem_title: t("Un servizio di sistema non si è avviato"),
+            explanation: t("Uno o più servizi systemd sono in errore. Possiamo azzerare lo stato di errore."),
+            fix_label: t("Resetta servizi systemd falliti"),
             fix_script: "systemctl reset-failed && echo '✔ Stato servizi falliti resettato'",
             needs_root: true,
         });
@@ -131,9 +133,9 @@ pub fn get_active_fixes(out: &str) -> Vec<CrashFixOption> {
 
     if lines.iter().any(|l| l.contains("failed to load firmware") || l.contains("firmware: failed")) {
         fixes.push(CrashFixOption {
-            problem_title: "Manca un firmware per una periferica",
-            explanation: "Il kernel non trova i binari di alcune periferiche. Aggiorniamo i pacchetti firmware.",
-            fix_label: "Installa/aggiorna pacchetti firmware",
+            problem_title: t("Manca un firmware per una periferica"),
+            explanation: t("Il kernel non trova i binari di alcune periferiche. Aggiorniamo i pacchetti firmware."),
+            fix_label: t("Installa/aggiorna pacchetti firmware"),
             fix_script: "apt-get update && apt-get install -y firmware-linux firmware-misc-nonfree && echo '✔ Firmware aggiornati'",
             needs_root: true,
         });
@@ -141,9 +143,9 @@ pub fn get_active_fixes(out: &str) -> Vec<CrashFixOption> {
 
     if lines.iter().any(|l| l.contains("dpkg") && (l.contains("error") || l.contains("interrupted"))) {
         fixes.push(CrashFixOption {
-            problem_title: "Problemi con i pacchetti installati (DPKG/APT bloccato)",
-            explanation: "Il gestore pacchetti è rimasto bloccato da un'installazione interrotta.",
-            fix_label: "Sblocca e ripara database pacchetti",
+            problem_title: t("Problemi con i pacchetti installati (DPKG/APT bloccato)"),
+            explanation: t("Il gestore pacchetti è rimasto bloccato da un'installazione interrotta."),
+            fix_label: t("Sblocca e ripara database pacchetti"),
             fix_script: "if command -v fuser >/dev/null 2>&1 && fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1; then echo 'apt/dpkg è in esecuzione: attendi che finisca prima di riparare.'; exit 1; fi; rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock && dpkg --configure -a && apt-get install -f -y && echo '✔ DPKG riparato'",
             needs_root: true,
         });

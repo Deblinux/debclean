@@ -1,3 +1,4 @@
+use crate::i18n::t;
 use std::fs;
 use std::process::Command;
 
@@ -16,10 +17,10 @@ pub fn scan_telemetry_daemons() -> Vec<TelemetryItem> {
 
     // Lista di demoni noti di telemetria / crash reporting su Linux
     let known_daemons = vec![
-        ("whoopsie", "Ubuntu Crash Report Daemon (invia crash report automaticamente)"),
-        ("apport", "Apport Crash Collector (raccoglie e invia segnalazioni di errori)"),
-        ("telemetry", "Servizio generico di telemetria di terze parti"),
-        ("collector", "Demone di raccolta dati diagnostici"),
+        ("whoopsie", t("Ubuntu Crash Report Daemon (invia crash report automaticamente)")),
+        ("apport", t("Apport Crash Collector (raccoglie e invia segnalazioni di errori)")),
+        ("telemetry", t("Servizio generico di telemetria di terze parti")),
+        ("collector", t("Demone di raccolta dati diagnostici")),
     ];
 
     for (svc, desc) in known_daemons {

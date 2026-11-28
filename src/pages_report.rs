@@ -1,3 +1,4 @@
+use crate::i18n::{self, t, tf};
 use std::fs;
 use std::process::Command;
 
@@ -31,7 +32,7 @@ fn run_cmd(cmd: &str, args: &[&str]) -> String {
                 stdout.trim().to_string()
             }
         }
-        Err(e) => format!("Comando non disponibile ({}): {}", cmd, e),
+        Err(e) => tf("Comando non disponibile ({}): {}", &[&cmd, &e]),
     }
 }
 
@@ -54,14 +55,18 @@ pub fn generate_html_report(opts: &ReportOptions, output_path: &str) -> Result<S
         let mem = run_cmd("free", &["-h"]);
         body.push_str(&format!(
             r#"<section>
-                <h2>1. Informazioni Hardware e Kernel</h2>
-                <h3>Sistema e Kernel</h3><pre>{}</pre>
-                <h3>Memoria RAM e Swap</h3><pre>{}</pre>
-                <h3>Processore (CPU)</h3><pre>{}</pre>
+                <h2>{title}</h2>
+                <h3>{sys}</h3><pre>{uname}</pre>
+                <h3>{ram}</h3><pre>{mem}</pre>
+                <h3>{cpu}</h3><pre>{lscpu}</pre>
             </section>"#,
-            escape_html(&uname),
-            escape_html(&mem),
-            escape_html(&lscpu),
+            title = t("1. Informazioni Hardware e Kernel"),
+            sys = t("Sistema e Kernel"),
+            uname = escape_html(&uname),
+            ram = t("Memoria RAM e Swap"),
+            mem = escape_html(&mem),
+            cpu = t("Processore (CPU)"),
+            lscpu = escape_html(&lscpu),
         ));
     }
 
@@ -70,28 +75,34 @@ pub fn generate_html_report(opts: &ReportOptions, output_path: &str) -> Result<S
         let lsblk = run_cmd("lsblk", &["-f"]);
         body.push_str(&format!(
             r#"<section>
-                <h2>2. Spazio Disco e Partizioni</h2>
-                <h3>Utilizzo File System</h3><pre>{}</pre>
-                <h3>Dispositivi a Blocchi</h3><pre>{}</pre>
+                <h2>{title}</h2>
+                <h3>{usage}</h3><pre>{df}</pre>
+                <h3>{devices}</h3><pre>{lsblk}</pre>
             </section>"#,
-            escape_html(&df),
-            escape_html(&lsblk),
+            title = t("2. Spazio Disco e Partizioni"),
+            usage = t("Utilizzo File System"),
+            df = escape_html(&df),
+            devices = t("Dispositivi a Blocchi"),
+            lsblk = escape_html(&lsblk),
         ));
     }
 
     if opts.packages {
         let held = run_cmd("apt-mark", &["showhold"]);
         let audit = run_cmd("dpkg", &["--audit"]);
-        let held_txt = if held.is_empty() { "Nessun pacchetto bloccato (hold).".to_string() } else { held };
-        let audit_txt = if audit.is_empty() { "Nessun pacchetto danneggiato o parzialmente installato.".to_string() } else { audit };
+        let held_txt = if held.is_empty() { t("Nessun pacchetto bloccato (hold).").to_string() } else { held };
+        let audit_txt = if audit.is_empty() { t("Nessun pacchetto danneggiato o parzialmente installato.").to_string() } else { audit };
         body.push_str(&format!(
             r#"<section>
-                <h2>3. Stato Pacchetti APT</h2>
-                <h3>Pacchetti Bloccati (Hold)</h3><pre>{}</pre>
-                <h3>Audit Integrità Pacchetti</h3><pre>{}</pre>
+                <h2>{title}</h2>
+                <h3>{held}</h3><pre>{held_txt}</pre>
+                <h3>{audit}</h3><pre>{audit_txt}</pre>
             </section>"#,
-            escape_html(&held_txt),
-            escape_html(&audit_txt),
+            title = t("3. Stato Pacchetti APT"),
+            held = t("Pacchetti Bloccati (Hold)"),
+            held_txt = escape_html(&held_txt),
+            audit = t("Audit Integrità Pacchetti"),
+            audit_txt = escape_html(&audit_txt),
         ));
     }
 
@@ -100,21 +111,24 @@ pub fn generate_html_report(opts: &ReportOptions, output_path: &str) -> Result<S
         let dmesg_err = run_cmd("journalctl", &["-k", "-p", "3", "-n", "30", "--no-pager"]);
         body.push_str(&format!(
             r#"<section>
-                <h2>4. Log di Errore Recenti (Avvio Corrente)</h2>
-                <h3>Errori di Sistema (journalctl -p err)</h3><pre>{}</pre>
-                <h3>Errori del Kernel</h3><pre>{}</pre>
+                <h2>{title}</h2>
+                <h3>{system}</h3><pre>{journal}</pre>
+                <h3>{kernel}</h3><pre>{dmesg_err}</pre>
             </section>"#,
-            escape_html(&journal),
-            escape_html(&dmesg_err),
+            title = t("4. Log di Errore Recenti (Avvio Corrente)"),
+            system = t("Errori di Sistema (journalctl -p err)"),
+            journal = escape_html(&journal),
+            kernel = t("Errori del Kernel"),
+            dmesg_err = escape_html(&dmesg_err),
         ));
     }
 
     let html = format!(
         r#"<!DOCTYPE html>
-<html lang="it">
+<html lang="{lang}">
 <head>
 <meta charset="UTF-8">
-<title>DebUtility - Report Diagnostica ({host_escaped})</title>
+<title>{page_title} ({host_escaped})</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; color: #1e293b; margin: 0; padding: 24px; }}
   .container {{ max-width: 960px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }}
@@ -131,15 +145,23 @@ pub fn generate_html_report(opts: &ReportOptions, output_path: &str) -> Result<S
 <body>
 <div class="container">
   <header>
-    <h1>DebUtility — Report di Diagnostica di Sistema</h1>
-    <div class="meta">Host: <strong>{host_escaped}</strong> | Generato il: <strong>{date}</strong></div>
+    <h1>{heading}</h1>
+    <div class="meta">{host_label}: <strong>{host_escaped}</strong> | {date_label}: <strong>{date}</strong></div>
   </header>
   {body}
 </div>
 </body>
-</html>"#
+</html>"#,
+        lang = i18n::code_of(i18n::lang()),
+        page_title = t("DebUtility - Report Diagnostica"),
+        heading = t("DebUtility — Report di Diagnostica di Sistema"),
+        host_label = t("Host:"),
+        date_label = t("Generato il:"),
+        host_escaped = host_escaped,
+        date = date,
+        body = body,
     );
 
-    fs::write(output_path, html).map_err(|_| "Impossibile salvare il file del report sul disco.")?;
+    fs::write(output_path, html).map_err(|_| t("Impossibile salvare il file del report sul disco."))?;
     Ok(output_path.to_string())
 }

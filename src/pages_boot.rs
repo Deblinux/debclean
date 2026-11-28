@@ -1,4 +1,4 @@
-use crate::i18n::t;
+use crate::i18n::{t, tf};
 use crate::{ui, util, App, Msg};
 use eframe::egui;
 use std::fs;
@@ -160,7 +160,7 @@ impl App {
 
         if self.boot_tab == 0 {
             ui.horizontal(|ui| {
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Aggiorna Analisi Avvio"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna Analisi Avvio"))).clicked() {
                     self.spawn(ctx, move |ch| {
                         ch.send(Msg::Log("▶ Eseguo systemd-analyze blame...".into()));
                         let (summary, items) = read_boot_blame();
@@ -270,7 +270,7 @@ impl App {
                                 ui.horizontal(|ui| {
                                     ui.label(egui::RichText::new(&item.name).strong());
                                     if item.delay_seconds > 0 {
-                                        ui.colored_label(crate::ui::accent_text(), format!("(Ritardo: {}s)", item.delay_seconds));
+                                        ui.colored_label(crate::ui::accent_text(), tf("(Ritardo: {}s)", &[&item.delay_seconds]));
                                     }
                                 });
                                 ui.label(egui::RichText::new(&item.exec).color(crate::ui::text_dim()).size(12.0));

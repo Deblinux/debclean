@@ -273,9 +273,9 @@ fn collect_components(devs: &[PciDev], gpus: &[Section]) -> Vec<Section> {
         push("Scheda madre", join_opt(dmi("board_vendor"), dmi("board_name")));
         push("BIOS/UEFI", join_opt(dmi("bios_vendor"), dmi("bios_version")));
         push("Data BIOS", dmi("bios_date"));
-        push("Tipo di computer", dmi("chassis_type").and_then(|c| chassis(&c)));
+        push(t("Tipo di computer"), dmi("chassis_type").and_then(|c| chassis(&c)));
         let boot = if Path::new("/sys/firmware/efi").exists() { t("UEFI") } else { t("BIOS (legacy)") };
-        push("Firmware di avvio", Some(boot.to_string()));
+        push(t("Firmware di avvio"), Some(boot.to_string()));
     }
     v.push(Section { title: t("Sistema e scheda madre").to_string(), rows });
 
@@ -545,15 +545,14 @@ fn ram_job() -> Job {
 
 fn section_card(ui: &mut egui::Ui, id: usize, title: &str, rows: &[(String, String)]) {
     ui::card(ui, |ui| {
-        ui.label(egui::RichText::new(title).strong().size(19.0));
-        ui.add_space(2.0);
-        egui::Grid::new(("hwsec", id)).num_columns(2).striped(true).show(ui, |ui| {
+        ui::section_text(ui, "▣", title, "");
+        egui::Grid::new(("hwsec", id)).num_columns(2).striped(true).spacing(egui::vec2(12.0, 6.0)).show(ui, |ui| {
             for (k, v) in rows {
                 ui::kv(ui, k, v);
             }
         });
     });
-    ui.add_space(3.0);
+    ui.add_space(4.0);
 }
 
 impl App {
@@ -584,7 +583,7 @@ impl App {
         });
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("Rileva marca e tipo dei moduli (richiede password)"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Rileva marca e tipo dei moduli (richiede password)"), self.action_enabled()).clicked() {
                 self.spawn(ctx, ram_job());
             }
             if self.busy {

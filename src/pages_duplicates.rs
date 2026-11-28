@@ -93,9 +93,9 @@ pub fn scan_duplicates_with<F: FnMut(&str, usize, usize)>(
         min_kb.saturating_mul(1024),
         &mut by_size,
         &mut seen,
-        &mut |n| on_progress("Individuazione file", n, 0),
+        &mut |n| on_progress(t("Individuazione file"), n, 0),
     );
-    on_progress("Individuazione file", seen, seen.max(1));
+    on_progress(t("Individuazione file"), seen, seen.max(1));
 
     let candidates: Vec<(u64, Vec<PathBuf>)> = by_size
         .into_iter()
@@ -115,7 +115,7 @@ pub fn scan_duplicates_with<F: FnMut(&str, usize, usize)>(
                 by_head.entry(head).or_default().push(p);
             }
             done_head += 1;
-            on_progress("Confronto impronte (filtro rapido)", done_head, total_head);
+            on_progress(t("Confronto impronte (filtro rapido)"), done_head, total_head);
         }
 
         // Fase 3: hash completo SHA-256 solo sui candidati reali
@@ -130,7 +130,7 @@ pub fn scan_duplicates_with<F: FnMut(&str, usize, usize)>(
                     by_hash.entry(h).or_default().push(p);
                 }
                 done_hash += 1;
-                on_progress("Verifica SHA-256", done_hash, total_hash);
+                on_progress(t("Verifica SHA-256"), done_hash, total_hash);
             }
 
             for (_, mut dupes) in by_hash {
@@ -167,9 +167,9 @@ impl App {
         );
 
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("Cartella da scansionare:"));
-                ui.add(egui::TextEdit::singleline(&mut self.dup_dir).desired_width(300.0));
+                ui.add(egui::TextEdit::singleline(&mut self.dup_dir).desired_width(ui::fit_width(ui, 300.0, 110.0)));
                 if ui.button(t("Home")).clicked() {
                     self.dup_dir = util::home();
                 }
@@ -183,7 +183,7 @@ impl App {
             });
             ui.add_space(3.0);
             ui.horizontal(|ui| {
-                if ui::primary_button(ui, t("Cerca duplicati"), !self.busy).clicked() {
+                if ui::primary_button(ui, t("Cerca duplicati"), self.action_enabled()).clicked() {
                     let dir = self.dup_dir.clone();
                     let min_kb = self.dup_min_kb;
                     let skip = self.dup_skip_hidden;
@@ -238,11 +238,9 @@ impl App {
         ui::card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!(
+                    egui::RichText::new(tf(
                         "{}: {} file ({})",
-                        t("Selezionati per la quarantena"),
-                        selected_count,
-                        cleaner::fmt_bytes(selected_bytes)
+                        &[&t("Selezionati per la quarantena"), &selected_count, &cleaner::fmt_bytes(selected_bytes)]
                     ))
                     .strong()
                     .color(ui::accent_text()),
@@ -250,7 +248,7 @@ impl App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled(
-                            !self.busy && selected_count > 0,
+                            self.action_enabled() && selected_count > 0,
                             egui::Button::new(
                                 egui::RichText::new(t("Sposta selezionati in quarantena"))
                                     .strong()
@@ -323,12 +321,9 @@ impl App {
                 ui::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(format!(
+                            egui::RichText::new(tf(
                                 "{} #{} — {} ({} copie)",
-                                t("Gruppo"),
-                                idx + 1,
-                                cleaner::fmt_bytes(g.size),
-                                g.files.len()
+                                &[&t("Gruppo"), &(idx + 1), &cleaner::fmt_bytes(g.size), &g.files.len()]
                             ))
                             .strong()
                             .color(ui::accent_text()),

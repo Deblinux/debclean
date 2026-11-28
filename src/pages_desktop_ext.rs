@@ -1,4 +1,4 @@
-use crate::i18n::t;
+use crate::i18n::{t, tf};
 use crate::{ui, util, App};
 use eframe::egui;
 
@@ -50,7 +50,8 @@ impl App {
         let de = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_uppercase();
         ui::card(ui, |ui| {
             ui.label(egui::RichText::new(t("Estensioni Desktop")).strong().size(20.0));
-            ui.label(format!("{}: {}", t("Ambiente desktop rilevato"), if de.is_empty() { "Sconosciuto" } else { &de }));
+            let de = if de.is_empty() { t("Sconosciuto") } else { de.as_str() };
+            ui.label(tf("Ambiente desktop rilevato: {}", &[&de]));
         });
         ui.add_space(3.0);
 

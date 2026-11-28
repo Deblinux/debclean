@@ -1,3 +1,4 @@
+use crate::i18n::tf;
 use crate::util::run_shell;
 use std::fs;
 use sysinfo::{Components, Disks, System};
@@ -64,7 +65,7 @@ fn read_cpu(sys: &System) -> CpuInfo {
     let fam = get(&["cpu family", "CPU architecture"]);
     let mdl = get(&["model", "CPU part"]);
     let step = get(&["stepping", "CPU revision"]);
-    let details = format!("famiglia {fam} · modello {mdl} · stepping {step}");
+    let details = tf("famiglia {} · modello {} · stepping {}", &[&fam, &mdl, &step]);
 
     // Cache dalla sysfs
     let mut caches = Vec::new();

@@ -1,4 +1,4 @@
-use crate::i18n::t;
+use crate::i18n::{t, tf, tr};
 use crate::{ui, App};
 use eframe::egui;
 use std::fs;
@@ -42,13 +42,13 @@ pub fn scan_surgical_residuals(query: &str) -> Vec<ResidualArtifact> {
 
     // (cartella, etichetta del tipo di residuo)
     let targets: [(&str, &str); 7] = [
-        ("/etc", "Config (/etc)"),
-        ("/lib/udev/rules.d", "Regola Udev"),
-        ("/etc/udev/rules.d", "Regola Udev"),
-        ("/etc/dbus-1/system.d", "Servizio / Cron"),
-        ("/etc/polkit-1/actions", "Servizio / Cron"),
-        ("/etc/cron.d", "Servizio / Cron"),
-        ("/usr/share/polkit-1/actions", "Servizio / Cron"),
+        ("/etc", t("Config (/etc)")),
+        ("/lib/udev/rules.d", t("Regola Udev")),
+        ("/etc/udev/rules.d", t("Regola Udev")),
+        ("/etc/dbus-1/system.d", t("Servizio / Cron")),
+        ("/etc/polkit-1/actions", t("Servizio / Cron")),
+        ("/etc/cron.d", t("Servizio / Cron")),
+        ("/usr/share/polkit-1/actions", t("Servizio / Cron")),
     ];
 
     for (dir, label) in targets {
@@ -114,7 +114,7 @@ impl App {
                     for item in &mut self.app_lifecycle_residuals {
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut item.selected, "");
-                            ui.label(egui::RichText::new(&item.artifact_type).strong().color(ui::semantic_text(ui::WARN)));
+                            ui.label(egui::RichText::new(tr(&item.artifact_type)).strong().color(ui::semantic_text(ui::WARN)));
                             ui.label(item.path.to_string_lossy().as_ref());
                         });
                         ui.add_space(2.0);
@@ -125,7 +125,7 @@ impl App {
                 let n_sel = self.app_lifecycle_residuals.iter().filter(|i| i.selected).count();
                 if ui
                     .add_enabled(
-                        !self.busy && n_sel > 0,
+                        self.action_enabled() && n_sel > 0,
                         egui::Button::new(
                             egui::RichText::new(t("Esegui Bonifica Chirurgica Selezionati")).color(ui::semantic_text(ui::BAD)),
                         ),
@@ -148,8 +148,8 @@ impl App {
                     let script = format!("rm -rf -- {args}");
                     let job = crate::cmd_job("app_lifecycle", script, true);
                     let msg = format!(
-                        "Eliminare definitivamente {} elementi di sistema?\n{}",
-                        paths_to_remove.len(),
+                        "{}\n{}",
+                        tf("Eliminare definitivamente {} elementi di sistema?", &[&paths_to_remove.len()]),
                         paths_to_remove.join("\n")
                     );
                     self.confirm_snapshot(msg, job);

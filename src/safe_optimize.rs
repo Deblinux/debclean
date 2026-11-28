@@ -133,50 +133,50 @@ fn remove_dir_children(path: &Path) -> usize {
 pub fn preview_steps() -> Vec<PreviewStep> {
     let browser_open = any_browser_running();
     let browser_note = if browser_open {
-        Some("Saltato ora perché un browser è aperto")
+        Some(t("Saltato ora perché un browser è aperto"))
     } else {
         None
     };
 
     vec![
         PreviewStep {
-            title: "Riparazione pacchetti e dipendenze",
-            detail: "Completa configurazioni APT/dpkg interrotte e sistema dipendenze rotte senza forzare rimozioni.",
+            title: t("Riparazione pacchetti e dipendenze"),
+            detail: t("Completa configurazioni APT/dpkg interrotte e sistema dipendenze rotte senza forzare rimozioni."),
             size: None,
             will_run: true,
             note: None,
         },
         PreviewStep {
-            title: "Cache dei browser",
-            detail: "Svuota solo i file temporanei della cache. Non tocca password, preferiti, cronologia o cookie.",
+            title: t("Cache dei browser"),
+            detail: t("Svuota solo i file temporanei della cache. Non tocca password, preferiti, cronologia o cookie."),
             size: cleaner::size(Kind::BrowserCache),
             will_run: !browser_open,
             note: browser_note,
         },
         PreviewStep {
-            title: "Cache pacchetti APT",
-            detail: "Rimuove i file .deb già installati e non più necessari. Non disinstalla alcun programma.",
+            title: t("Cache pacchetti APT"),
+            detail: t("Rimuove i file .deb già installati e non più necessari. Non disinstalla alcun programma."),
             size: cleaner::size(Kind::AptCache),
             will_run: true,
             note: None,
         },
         PreviewStep {
-            title: "Log obsoleti in /var/log",
-            detail: "Elimina solo i vecchi file di log compressi o ruotati (.gz, .old, numerati).",
+            title: t("Log obsoleti in /var/log"),
+            detail: t("Elimina solo i vecchi file di log compressi o ruotati (.gz, .old, numerati)."),
             size: cleaner::size(Kind::OldLogs),
             will_run: true,
             note: None,
         },
         PreviewStep {
-            title: "Miniature (Thumbnails)",
-            detail: "Pulisce le anteprime salvate. Verranno rigenerate automaticamente se serve.",
+            title: t("Miniature (Thumbnails)"),
+            detail: t("Pulisce le anteprime salvate. Verranno rigenerate automaticamente se serve."),
             size: cleaner::size(Kind::Thumbnails),
             will_run: true,
             note: None,
         },
         PreviewStep {
-            title: "Compattazione database SQLite",
-            detail: "Ottimizza i database dei browser chiusi senza cancellare dati o credenziali.",
+            title: t("Compattazione database SQLite"),
+            detail: t("Ottimizza i database dei browser chiusi senza cancellare dati o credenziali."),
             size: None,
             will_run: !browser_open,
             note: browser_note,

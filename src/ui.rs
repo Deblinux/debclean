@@ -1,4 +1,4 @@
-use crate::i18n::{t, tr};
+use crate::i18n::{t, tf, tr};
 use crate::pages_disk_treemap::DiskCategory;
 use crate::Page;
 use eframe::egui::epaint::{Mesh, TextureId, Vertex, WHITE_UV};
@@ -132,7 +132,8 @@ pub fn page_risk(page: Page) -> RiskLevel {
         | Themes | MenuEditor | TelemetryGuard | Mounts | DevContainers | Zram | Quarantine => Caution,
         // Cancellazioni definitive, permessi, bootloader e componenti di sistema.
         Fixer | Kernel | KernelBoot | Repos | Startup | Perms | Services | Synaptic | Shredder
-        | AppLifecycle | Duplicates | Firewall | SecurityHardening | SystemEditor => Delicate,
+        | AppLifecycle | Duplicates | Firewall | SecurityHardening | SystemEditor
+        | RestoreHistory => Delicate,
     }
 }
 
@@ -159,6 +160,175 @@ pub fn begin_page(ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.spacing_mut().button_padding.y = 6.0;
     }
+}
+
+// ---- Helper tabelle: filtro rapido, ordinamento, selezione -------------------
+
+/// Direzione di ordinamento di una colonna.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortDir {
+    Asc,
+    Desc,
+}
+
+impl SortDir {
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Asc => Self::Desc,
+            Self::Desc => Self::Asc,
+        }
+    }
+
+    pub fn arrow(self) -> &'static str {
+        match self {
+            Self::Asc => "▲",
+            Self::Desc => "▼",
+        }
+    }
+}
+
+/// Stato generico di ordinamento per colonna.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SortState<K: Copy + PartialEq> {
+    pub key: K,
+    pub dir: SortDir,
+}
+
+impl<K: Copy + PartialEq> SortState<K> {
+    pub fn new(key: K, dir: SortDir) -> Self {
+        Self { key, dir }
+    }
+
+    /// Clic su intestazione: stesso campo = toggle, campo diverso = ascendente.
+    pub fn click(&mut self, key: K) {
+        if self.key == key {
+            self.dir = self.dir.toggle();
+        } else {
+            self.key = key;
+            self.dir = SortDir::Asc;
+        }
+    }
+}
+
+/// Disegna un'intestazione di colonna cliccabile con indicatore `▲/▼`.
+pub fn sort_header<K: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    label: &str,
+    key: K,
+    sort: &mut SortState<K>,
+) {
+    let active = sort.key == key;
+    let text = if active {
+        format!("{} {}", label, sort.dir.arrow())
+    } else {
+        label.to_string()
+    };
+    let color = if active { accent_text() } else { text_primary() };
+    let resp = ui.add(
+        egui::Button::new(egui::RichText::new(text).strong().color(color))
+            .frame(false)
+            .wrap(),
+    );
+    if resp.clicked() {
+        sort.click(key);
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+}
+
+/// Barra di filtro rapido con contatore "X / Y" e pulsante svuota.
+pub fn filter_bar(ui: &mut egui::Ui, filter: &mut String, shown: usize, total: usize) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(t("Filtra:"));
+        let resp = ui.add(
+            egui::TextEdit::singleline(filter)
+                .hint_text(t("Filtro rapido..."))
+                .desired_width(fit_width(ui, 280.0, 120.0)),
+        );
+        if !filter.is_empty() {
+            if ui
+                .small_button("✕")
+                .on_hover_text(t("Svuota filtro"))
+                .clicked()
+            {
+                filter.clear();
+                resp.request_focus();
+            }
+        }
+        ui.label(
+            egui::RichText::new(format!("{shown} / {total}"))
+                .color(text_dim())
+                .small(),
+        );
+    });
+}
+
+/// Pulsanti uniformi di selezione multipla, adattivi allo spazio.
+pub fn selection_controls(ui: &mut egui::Ui, selected: usize, total: usize) -> SelectionAction {
+    let mut action = SelectionAction::None;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new(tf("{} selezionati", &[&selected.to_string()]))
+                .color(text_dim())
+                .small(),
+        );
+        if total > 0 {
+            let compact = ui.available_width() < 360.0;
+            let all_label = if compact { t("Tutti") } else { t("Seleziona tutto") };
+            let none_label = if compact { t("Nessuno") } else { t("Deseleziona tutto") };
+            if ui.small_button(all_label).clicked() {
+                action = SelectionAction::All;
+            }
+            if ui.small_button(none_label).clicked() {
+                action = SelectionAction::NoneSelected;
+            }
+        }
+    });
+    action
+}
+
+/// Azione richiesta dai controlli di selezione rapida.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionAction {
+    None,
+    All,
+    NoneSelected,
+}
+
+/// Confronto case-insensitive per ordinamento alfabetico.
+pub fn cmp_alpha(a: &str, b: &str) -> std::cmp::Ordering {
+    let a = a.to_lowercase();
+    let b = b.to_lowercase();
+    a.cmp(&b)
+}
+
+/// Estrae un numero da stringhe tipo "12.3", "5%", "1234".
+pub fn parse_f64_loose(s: &str) -> f64 {
+    let cleaned: String = s
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == ',')
+        .collect();
+    cleaned.replace(',', ".").parse::<f64>().unwrap_or(0.0)
+}
+
+/// Larghezza adattiva: `ideal` viene usata quando c'è spazio, altrimenti si
+/// restringe fino a `min` senza mai superare lo spazio effettivamente libero.
+/// Serve a evitare che widget con larghezze storiche (420, 520, 640 px)
+/// sbordino dalle schede su monitor da 800 px o con traduzioni lunghe.
+pub fn fit_width(ui: &egui::Ui, ideal: f32, min: f32) -> f32 {
+    let avail = ui.available_width().max(1.0);
+    let floor = min.min(avail);
+    ideal.min(avail).max(floor)
+}
+
+/// Numero di colonne di larghezza `ideal` che entrano davvero nello spazio
+/// disponibile (almeno una, al massimo `max`).
+pub fn column_count(ui: &egui::Ui, ideal: f32, gap: f32, max: usize) -> usize {
+    let avail = ui.available_width().max(1.0);
+    let count = ((avail + gap) / (ideal + gap)).floor().max(1.0) as usize;
+    count.max(1).min(max)
 }
 
 pub fn current_risk() -> RiskLevel {
@@ -220,6 +390,25 @@ pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 /// Copia un colore cambiandone solo l'alfa.
 pub fn alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(c[0], c[1], c[2], a)
+}
+
+/// Pillola di stato condivisa da tutte le schede: sfondo tenue, bordo sottile,
+/// testo leggibile sia nel tema scuro sia in quello chiaro. Un solo frame, senza
+/// ombre né gradienti: può essere usata anche dentro elenchi di centinaia di righe.
+pub fn pill(ui: &mut egui::Ui, text: &str, tint: Color32) {
+    egui::Frame::default()
+        .fill(alpha(tint, if is_dark() { 46 } else { 30 }))
+        .stroke(Stroke::new(1.0_f32, alpha(tint, if is_dark() { 140 } else { 190 })))
+        .rounding(7.0)
+        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .size(12.5)
+                    .strong()
+                    .color(if is_dark() { mix(tint, Color32::WHITE, 0.55) } else { semantic_text(tint) }),
+            );
+        });
 }
 
 /// Badge/riquadro icona universale: quadrato arrotondato 8px, sfondo al 15%
@@ -354,7 +543,8 @@ pub fn apply_theme(ctx: &egui::Context, dark_mode: bool) {
 
 /// Pillola arrotondata con icona ed etichetta del livello di rischio.
 fn risk_badge(ui: &mut egui::Ui, risk: RiskLevel) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(142.0, 26.0), Sense::hover());
+    let w = fit_width(ui, 142.0, 92.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
     let p = ui.painter();
     let fill_alpha = if is_dark() { 46 } else { 34 };
     let stroke_alpha = if is_dark() { 170 } else { 220 };
@@ -365,7 +555,7 @@ fn risk_badge(ui: &mut egui::Ui, risk: RiskLevel) -> egui::Response {
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(13.5),
+        FontId::proportional(if w < 118.0 { 11.5 } else { 13.5 }),
         risk.text_color(),
     );
     resp.on_hover_text(risk.label())
@@ -436,17 +626,22 @@ pub fn title_compact(ui: &mut egui::Ui, text: &'static str) {
 
 /// Intestazione di sezione con icona, titolo e sottotitolo.
 pub fn section(ui: &mut egui::Ui, glyph: &str, name: &'static str, sub: &'static str) {
+    section_text(ui, glyph, t(name), if sub.is_empty() { "" } else { t(sub) });
+}
+
+/// Variante di [`section`] per testi già risolti a runtime (non traduce).
+pub fn section_text(ui: &mut egui::Ui, glyph: &str, name: &str, sub: &str) {
     if compact_pages() {
-        section_balanced(ui, glyph, name, sub);
+        section_text_balanced(ui, glyph, name, sub);
         return;
     }
     ui.horizontal(|ui| {
         let (badge, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
         icon_badge(ui.painter(), badge, ACCENT, glyph, 17.0);
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new(t(name)).strong().size(18.0));
+            ui.label(egui::RichText::new(name).strong().size(18.0));
             if !sub.is_empty() {
-                ui.label(egui::RichText::new(t(sub)).size(13.0).color(text_dim()));
+                ui.label(egui::RichText::new(sub).size(13.0).color(text_dim()));
             }
         });
     });
@@ -455,13 +650,17 @@ pub fn section(ui: &mut egui::Ui, glyph: &str, name: &'static str, sub: &'static
 
 /// Intestazione compatta per le schede standard: icona e testo su una riga sola.
 fn section_balanced(ui: &mut egui::Ui, glyph: &str, name: &'static str, sub: &'static str) {
+    section_text_balanced(ui, glyph, t(name), if sub.is_empty() { "" } else { t(sub) });
+}
+
+fn section_text_balanced(ui: &mut egui::Ui, glyph: &str, name: &str, sub: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 7.0;
         let (badge, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
         icon_badge(ui.painter(), badge, ACCENT, glyph, 14.0);
-        ui.label(egui::RichText::new(t(name)).strong().size(16.5));
+        ui.label(egui::RichText::new(name).strong().size(16.5));
         if !sub.is_empty() {
-            ui.label(egui::RichText::new(t(sub)).size(12.5).color(text_dim()));
+            ui.label(egui::RichText::new(sub).size(12.5).color(text_dim()));
         }
     });
     ui.add_space(3.0);
@@ -584,7 +783,8 @@ pub fn kpi_card(ui: &mut egui::Ui, glyph: &str, value: &str, name: &'static str,
 
 /// Card KPI compatta per la Dashboard: stessa struttura, altezza 50px.
 pub fn kpi_card_compact(ui: &mut egui::Ui, glyph: &str, value: &str, name: &'static str, tint: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(156.0, 50.0), Sense::hover());
+    let w = fit_width(ui, 156.0, 110.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 50.0), Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 8.0, card_bg(ui.ctx()));
     p.rect_stroke(rect, 8.0, Stroke::new(1.0_f32, card_border(ui.ctx())));
@@ -662,6 +862,28 @@ pub fn primary_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Res
     resp.on_hover_cursor(if enabled { egui::CursorIcon::PointingHand } else { egui::CursorIcon::NotAllowed })
 }
 
+/// Pulsante distruttivo condiviso: sfondo pieno rosso e testo scuro/chiaro in
+/// base alla luminanza, così etichette lunghe e tradotte restano leggibili.
+pub fn danger_button(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Response {
+    let resp = ui.add_enabled(
+        enabled,
+        egui::Button::new(
+            egui::RichText::new(text)
+                .strong()
+                .color(on_fill_text(BAD)),
+        )
+        .fill(BAD)
+        .rounding(if compact_pages() { 7.0 } else { 8.0 }),
+    );
+    resp.on_hover_cursor(if enabled { egui::CursorIcon::PointingHand } else { egui::CursorIcon::NotAllowed })
+}
+
+/// Intestazione di tabella con colore di testo adattato al tema. Nessun frame:
+/// viene disegnata direttamente nella cella dell'header di `TableBuilder`.
+pub fn table_head(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).strong().color(text_primary()));
+}
+
 /// Pulsante primario compatto, usato solo nella Dashboard: stessa palette, meno padding e testo 16px.
 pub fn primary_button_compact(ui: &mut egui::Ui, text: &str, enabled: bool) -> egui::Response {
     let old_padding = ui.spacing().button_padding;
@@ -689,19 +911,140 @@ pub fn primary_button_compact(ui: &mut egui::Ui, text: &str, enabled: bool) -> e
     resp.on_hover_cursor(if enabled { egui::CursorIcon::PointingHand } else { egui::CursorIcon::NotAllowed })
 }
 
-pub fn bar(frac: f32) -> egui::ProgressBar {
-    egui::ProgressBar::new(frac)
-        .fill(BAR_BLUE)
-        .desired_height(if compact_pages() { 20.0 } else { 26.0 })
-        .rounding(7.0)
+/// Luminanza percepita di un colore pieno (0..255).
+fn luma(c: Color32) -> f32 {
+    let [r, g, b, _] = c.to_array();
+    0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32
+}
+
+/// Testo ad alto contrasto sopra uno sfondo pieno: verde acqua, giallo e verde
+/// brillanti ricevono testo scuro, i colori scuri ricevono testo bianco.
+/// Usato da pillole e pulsanti di tutte le schede.
+pub fn on_fill_text(fill: Color32) -> Color32 {
+    if luma(fill) > 125.0 {
+        Color32::from_rgb(15, 23, 42)
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// Colore testo ad alto contrasto per una barra con riempimento `fill`.
+/// La soglia storica delle barre resta invariata (la Dashboard non cambia).
+pub fn progress_text_color(fill: Color32) -> Color32 {
+    if luma(fill) > 140.0 {
+        Color32::from_rgb(20, 24, 32)
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// Wrapper leggero attorno a `egui::ProgressBar` che forza testo ad alto contrasto.
+pub struct Bar {
+    frac: f32,
+    fill: Color32,
+    text: Option<egui::WidgetText>,
+    desired_height: f32,
+    desired_width: Option<f32>,
+    rounding: Rounding,
+    animate: bool,
+    show_percentage: bool,
+}
+
+impl Bar {
+    pub fn fill(mut self, fill: Color32) -> Self {
+        self.fill = fill;
+        self
+    }
+    pub fn text(mut self, text: impl Into<egui::WidgetText>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+    pub fn desired_height(mut self, height: f32) -> Self {
+        self.desired_height = height;
+        self
+    }
+    pub fn desired_width(mut self, width: f32) -> Self {
+        self.desired_width = Some(width);
+        self
+    }
+    pub fn rounding(mut self, rounding: impl Into<Rounding>) -> Self {
+        self.rounding = rounding.into();
+        self
+    }
+    pub fn animate(mut self, animate: bool) -> Self {
+        self.animate = animate;
+        self
+    }
+    pub fn show_percentage(mut self) -> Self {
+        self.show_percentage = true;
+        self
+    }
+}
+
+impl egui::Widget for Bar {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let frac = self.frac.clamp(0.0, 1.0);
+        let text = if self.show_percentage && self.text.is_none() {
+            Some(egui::WidgetText::from(format!("{:.0}%", frac * 100.0)))
+        } else {
+            self.text
+        };
+        let mut bar = egui::ProgressBar::new(frac)
+            .fill(self.fill)
+            .desired_height(self.desired_height)
+            .rounding(self.rounding)
+            .animate(self.animate);
+        if let Some(text) = text {
+            bar = bar.text(text);
+        }
+        if let Some(width) = self.desired_width {
+            bar = bar.desired_width(width);
+        }
+        // Il testo è centrato sull'intera barra: se il riempimento è chiaro ma copre
+        // poco spazio, il testo scuro sparirebbe sullo sfondo scuro del tema.
+        // Usiamo il contrasto contro il riempimento solo quando copre abbastanza.
+        let fill_contrast = progress_text_color(self.fill);
+        let text_color = if frac >= 0.45 {
+            fill_contrast
+        } else if is_dark() {
+            Color32::WHITE
+        } else {
+            TEXT_LIGHT
+        };
+        ui.scope(|ui| {
+            ui.visuals_mut().override_text_color = Some(text_color);
+            ui.visuals_mut().selection.stroke.color = text_color;
+            ui.add(bar)
+        })
+        .inner
+    }
+}
+
+pub fn bar(frac: f32) -> Bar {
+    Bar {
+        frac,
+        fill: BAR_BLUE,
+        text: None,
+        desired_height: if compact_pages() { 20.0 } else { 26.0 },
+        desired_width: None,
+        rounding: Rounding::same(7.0),
+        animate: false,
+        show_percentage: false,
+    }
 }
 
 /// Barra di avanzamento dei job: verde acqua, alta e animata.
-pub fn progress_bar(frac: f32) -> egui::ProgressBar {
-    egui::ProgressBar::new(frac)
-        .fill(ACCENT)
-        .desired_height(if compact_pages() { 15.0 } else { 18.0 })
-        .rounding(8.0)
+pub fn progress_bar(frac: f32) -> Bar {
+    Bar {
+        frac,
+        fill: ACCENT,
+        text: None,
+        desired_height: if compact_pages() { 15.0 } else { 18.0 },
+        desired_width: None,
+        rounding: Rounding::same(8.0),
+        animate: false,
+        show_percentage: false,
+    }
 }
 
 pub fn heat_color(celsius: f32) -> Color32 {
@@ -756,6 +1099,7 @@ fn page_color(p: Page) -> Color32 {
         Page::AdvancedCleaner => (100, 200, 150),
         Page::Duplicates => (100, 180, 220),
         Page::Quarantine => (90, 170, 190),
+        Page::RestoreHistory => (70, 160, 180),
         Page::Services => (120, 180, 240),
         Page::Snaps => (120, 180, 240),
         Page::Report => (0, 168, 150),
@@ -972,7 +1316,7 @@ pub fn page_icon(p: &egui::Painter, c: Pos2, size: f32, page: Page) {
             p.circle_stroke(c, s, st);
             p.text(c, Align2::CENTER_CENTER, "📁", FontId::proportional(size * 0.55), w);
         }
-        Page::Quarantine => {
+        Page::RestoreHistory | Page::Quarantine => {
             // Freccia di ripristino: cerchio aperto con punta in alto.
             let pts: Vec<Pos2> = (1..=20)
                 .map(|i| {
@@ -1081,7 +1425,11 @@ pub fn sidebar_item(
         let hover_bg = if dark_mode { Color32::from_white_alpha(16) } else { Color32::from_black_alpha(14) };
         p.rect_filled(rect, 10.0, hover_bg);
     }
-    let icon = Rect::from_center_size(Pos2::new(rect.left() + 30.0, rect.center().y), vec2(30.0, 30.0));
+    // Con la sidebar a "binario" (finestre strette) restano solo icona e
+    // tooltip: il nome completo continua a essere leggibile passando il mouse.
+    let compact = rect.width() < 118.0;
+    let icon_x = if compact { rect.center().x } else { rect.left() + 30.0 };
+    let icon = Rect::from_center_size(Pos2::new(icon_x, rect.center().y), vec2(30.0, 30.0));
     page_icon(p, icon.center(), 27.0, page);
     let text_color = if !enabled {
         alpha(text_primary(), 110)
@@ -1091,36 +1439,38 @@ pub fn sidebar_item(
         text_primary()
     };
 
-    // Elide il testo prima del pallino: nessuna etichetta, anche molto lunga o
-    // con finestra stretta, può sovrapporsi o arrivare a ridosso del indicatore.
-    let text_left = rect.left() + TEXT_LEFT;
-    let dot_center = Pos2::new(rect.right() - DOT_INSET, rect.center().y);
-    let text_right = dot_center.x - DOT_RADIUS - DOT_CLEARANCE;
-    let max_width = (text_right - text_left).max(0.0);
-    let mut job = egui::text::LayoutJob::single_section(
-        name.to_string(),
-        egui::text::TextFormat {
-            font_id: FontId::proportional(if selected { 17.5 } else { 16.5 }),
-            color: text_color,
-            ..Default::default()
-        },
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
-    job.break_on_newline = false;
-    let galley = p.layout_job(job);
-    p.galley(
-        Pos2::new(text_left, rect.center().y - galley.size().y / 2.0),
-        galley,
-        text_color,
-    );
+    if !compact {
+        // Elide il testo prima del pallino: nessuna etichetta, anche molto lunga
+        // o con finestra stretta, può sovrapporsi al indicatore di rischio.
+        let text_left = rect.left() + TEXT_LEFT;
+        let dot_center = Pos2::new(rect.right() - DOT_INSET, rect.center().y);
+        let text_right = dot_center.x - DOT_RADIUS - DOT_CLEARANCE;
+        let max_width = (text_right - text_left).max(0.0);
+        let mut job = egui::text::LayoutJob::single_section(
+            name.to_string(),
+            egui::text::TextFormat {
+                font_id: FontId::proportional(if selected { 17.5 } else { 16.5 }),
+                color: text_color,
+                ..Default::default()
+            },
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(max_width);
+        job.break_on_newline = false;
+        let galley = p.layout_job(job);
+        p.galley(
+            Pos2::new(text_left, rect.center().y - galley.size().y / 2.0),
+            galley,
+            text_color,
+        );
 
-    // Il pallino del livello di rischio è sempre visibile, non solo sulla voce attiva.
-    p.circle_filled(dot_center, DOT_RADIUS, risk.color());
-    p.circle_stroke(
-        dot_center,
-        DOT_RADIUS,
-        Stroke::new(1.0_f32, alpha(if dark_mode { Color32::WHITE } else { Color32::BLACK }, 90)),
-    );
+        // Il pallino del livello di rischio è sempre visibile, non solo sulla voce attiva.
+        p.circle_filled(dot_center, DOT_RADIUS, risk.color());
+        p.circle_stroke(
+            dot_center,
+            DOT_RADIUS,
+            Stroke::new(1.0_f32, alpha(if dark_mode { Color32::WHITE } else { Color32::BLACK }, 90)),
+        );
+    }
     enabled && resp.clicked()
 }
 

@@ -1,3 +1,4 @@
+use crate::i18n::t;
 use crate::util::{home, run_shell, tail};
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -249,13 +250,13 @@ pub fn clean_all_with_progress<F: FnMut(usize, usize, &str)>(
     let total = kinds.len().max(1);
     let privs: Vec<&str> = kinds.iter().filter_map(|k| priv_cmd(*k)).collect();
     if !privs.is_empty() {
-        on_progress(0, total, "Pulizia di sistema in corso...");
+        on_progress(0, total, t("Pulizia di sistema in corso..."));
         // `&&`: un comando fallito non deve essere mascherato dall'ultimo della
         // catena (con `;` il risultato era sempre quello dell'ultimo comando).
         let (ok, out) = run_shell(&privs.join(" && "), true);
         let mark = if ok { "✔" } else { "✘" };
         log.push(format!("{mark} Pulizia di sistema: {}", tail(out.trim(), 3).replace('\n', " | ")));
-        on_progress(1, total, log.last().map(String::as_str).unwrap_or("Pulizia di sistema"));
+        on_progress(1, total, log.last().map(String::as_str).unwrap_or(t("Pulizia di sistema")));
     }
     let h = PathBuf::from(home());
     for (idx, k) in kinds.iter().enumerate() {
@@ -304,7 +305,7 @@ pub fn clean_all_with_progress<F: FnMut(usize, usize, &str)>(
             }
             _ => {}
         }
-        let label = log.last().map(String::as_str).unwrap_or("Pulizia in corso...");
+        let label = log.last().map(String::as_str).unwrap_or(t("Pulizia in corso..."));
         on_progress(idx + 1, total, label);
     }
     log

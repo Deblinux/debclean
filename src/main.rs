@@ -5,6 +5,7 @@ mod cleaner;
 mod health;
 mod pages_mounts;
 mod i18n;
+mod fonts;
 mod profile;
 mod telemetry;
 mod info;
@@ -48,8 +49,16 @@ mod pages_themes;
 mod pages_system_editor;
 mod progress;
 mod restore_points;
+mod restore_history;
+// Alcune funzioni del modulo sono entry point già coperte dai test e saranno
+// collegate a nuove azioni della UI: evita i warning di dead_code nella build
+// normale senza nasconderli nella suite di test.
+#[cfg_attr(not(test), allow(dead_code))]
+mod config_parsers;
+#[cfg(test)]
+mod test_support;
 use eframe::egui;
-use i18n::{t, tf};
+use i18n::{t, tf, tr};
 use hwinfo::{RamModule, Section};
 use pages_admin::{DriverProp, GroupRow, StartEntry};
 use pages_clean::Found;
@@ -61,6 +70,35 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use progress::{Progress, ProgressReporter};
 use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcSortKey {
+    Pid,
+    User,
+    Cpu,
+    Mem,
+    Cmd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppSortKey {
+    Name,
+    Version,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceSortKey {
+    Name,
+    State,
+    Description,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistorySortKey {
+    Date,
+    Command,
+}
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum Page {
     Dashboard,
@@ -96,6 +134,7 @@ pub enum Page {
     AdvancedCleaner,
     Duplicates,
     Quarantine,
+    RestoreHistory,
     Services,
     Snaps,
     Report,
@@ -125,6 +164,7 @@ const MENU: &[(&str, &[(Page, &str)])] = &[
             (Page::AdvancedCleaner, "Residui di sistema"),
             (Page::Duplicates, "File duplicati"),
             (Page::Quarantine, "Quarantena / Ripristino"),
+            (Page::RestoreHistory, "Cronologia e ripristino"),
             (Page::Fixer, "Fixer"),
             (Page::Updates, "Aggiornamenti"),
             (Page::Timers, "Pianificatore"),
@@ -276,6 +316,12 @@ pub enum Msg {
     RestorePoints(Vec<restore_points::Point>),
     /// Esito della scansione/rimozione dei punti di ripristino (`true` = errore).
     RestoreMessage(String, bool),
+    /// Elenco unificato di backup APT, `.bak` e quarantena.
+    RestoreHistoryItems(Vec<restore_history::Entry>, bool),
+    /// Una voce è stata ripristinata o eliminata con successo: va rimossa dalla vista.
+    RestoreHistoryRemoved(String),
+    /// Esito di un'azione sulla cronologia unificata (`true` = errore).
+    RestoreHistoryMessage(String, bool),
 }
 
 #[derive(Clone)]
@@ -295,6 +341,29 @@ impl Chan {
 }
 
 pub type Job = Box<dyn FnOnce(&Chan) + Send + 'static>;
+
+/// Operazione in attesa nella coda FIFO. I job sono `FnOnce`, quindi vengono
+/// spostati (non clonati) dalla coda al thread quando arriva il loro turno.
+pub(crate) struct QueuedJob {
+    label: String,
+    job: Job,
+}
+
+/// Numero massimo di operazioni accodabili per evitare code infinite.
+const MAX_QUEUED_JOBS: usize = 12;
+
+/// Etichetta di una pagina, usata per etichettare i job accodati senza dover
+/// modificare le decine di chiamanti di `spawn`.
+fn page_title(page: Page) -> &'static str {
+    for (_, entries) in MENU {
+        for (p, name) in entries.iter() {
+            if *p == page {
+                return *name;
+            }
+        }
+    }
+    t("Operazione in corso...")
+}
 
 /// Etichetta della barra per i comandi eseguiti tramite `cmd_job`.
 fn job_label(key: &'static str) -> &'static str {
@@ -366,17 +435,20 @@ pub fn fix_job(cmd: String) -> Job {
                 apt-get -y -f install";
             let (ok2, out2) = util::run_shell(grub_fix, true);
             ok = ok2;
-            out = format!("{out}\n--- Riparazione automatica GRUB ({}) ---\n{out2}", if ok2 { "OK" } else { "errore" });
+            out = format!(
+                "{out}\n{}\n{out2}",
+                tf("--- Riparazione automatica GRUB ({}) ---", &[&if ok2 { t("OK") } else { t("errore") }])
+            );
         }
         let low = out.to_lowercase();
         let head = if ok {
-            "✔ Completato"
+            t("✔ Completato")
         } else if low.contains("grub-pc") || low.contains("install_devices") {
-            "✘ Errore configurazione GRUB: usa la riparazione GRUB dedicata o verifica il disco di avvio"
+            t("✘ Errore configurazione GRUB: usa la riparazione GRUB dedicata o verifica il disco di avvio")
         } else if low.contains("not authorized") || low.contains("dismissed") || low.contains("permission denied") {
-            "✘ Privilegi di amministratore non concessi o annullati"
+            t("✘ Privilegi di amministratore non concessi o annullati")
         } else {
-            "✘ Errore durante la correzione"
+            t("✘ Errore durante la correzione")
         };
         ch.send(Msg::Out("fixer", out.clone()));
         ch.send(Msg::Log(format!("{head}: {}", util::tail(out.trim(), 4).replace('\n', " | "))));
@@ -527,16 +599,22 @@ pub struct App {
     ram_hist: VecDeque<f32>,
     out: HashMap<&'static str, String>,
     confirm: Option<(String, Job)>,
+    /// Coda FIFO delle operazioni lunghe: una alla volta, nell'ordine di richiesta.
+    job_queue: VecDeque<QueuedJob>,
     net: Option<NetStatus>,
     net_sockets: Vec<(String, String, String, String, String)>,
     gpg_keys: Vec<(String, String, String, String, String)>,
     net_socket_filter: String,
     procs: Vec<ProcRow>,
     proc_filter: String,
+    proc_sort: ui::SortState<ProcSortKey>,
+    proc_selected: Vec<String>,
     proc_pending: bool,
     last_proc: Instant,
     pkgs: Vec<Pkg>,
     pkg_filter: String,
+    pkg_sort: ui::SortState<AppSortKey>,
+    pkg_selected: Vec<String>,
     bigfiles: Vec<BigFile>,
     min_mb: u32,
     min_days: u32,
@@ -605,9 +683,21 @@ pub struct App {
     dup_groups: Vec<pages_duplicates::DuplicateGroup>,
     quarantine_items: Vec<quarantine::Item>,
     quarantine_msg: Option<(String, bool)>,
+    /// Stato della cronologia unificata (backup APT, `.bak`, quarantena).
+    restore_history_entries: Vec<restore_history::Entry>,
+    restore_history_selected: Option<String>,
+    restore_history_filter: String,
+    restore_history_kind: usize,
+    restore_history_sort: ui::SortState<restore_history::HistorySortKey>,
+    restore_history_msg: Option<(String, bool)>,
+    restore_history_restricted: bool,
     apt_history: Vec<history::AptTransaction>,
+    history_filter: String,
+    history_sort: ui::SortState<HistorySortKey>,
     services_list: Vec<pages_services::SystemdService>,
     svc_filter: String,
+    svc_sort: ui::SortState<ServiceSortKey>,
+    svc_selected: Vec<String>,
     report_opts: pages_report::ReportOptions,
     report_path: String,
     disk_analyzer_path: String,
@@ -674,6 +764,7 @@ pub struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let cfg = pages_sec::Config::load();
+        fonts::install(&cc.egui_ctx);
         ui::apply_theme(&cc.egui_ctx, cfg.dark_mode);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let (tx, rx) = channel();
@@ -706,16 +797,21 @@ impl App {
             ram_hist: VecDeque::new(),
             out: HashMap::new(),
             confirm: None,
+            job_queue: VecDeque::new(),
             net: None,
             net_sockets: Vec::new(),
             gpg_keys: Vec::new(),
             net_socket_filter: String::new(),
             procs: Vec::new(),
             proc_filter: String::new(),
+            proc_sort: ui::SortState::new(ProcSortKey::Cpu, ui::SortDir::Desc),
+            proc_selected: Vec::new(),
             proc_pending: false,
             last_proc: Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now),
             pkgs: Vec::new(),
             pkg_filter: String::new(),
+            pkg_sort: ui::SortState::new(AppSortKey::Name, ui::SortDir::Asc),
+            pkg_selected: Vec::new(),
             bigfiles: Vec::new(),
             min_mb: 100,
             min_days: 90,
@@ -782,9 +878,23 @@ impl App {
             dup_groups: Vec::new(),
             quarantine_items: quarantine::load().unwrap_or_default(),
             quarantine_msg: None,
+            restore_history_entries: Vec::new(),
+            restore_history_selected: None,
+            restore_history_filter: String::new(),
+            restore_history_kind: 0,
+            restore_history_sort: ui::SortState::new(
+                restore_history::HistorySortKey::Date,
+                ui::SortDir::Desc,
+            ),
+            restore_history_msg: None,
+            restore_history_restricted: false,
             apt_history: Vec::new(),
+            history_filter: String::new(),
+            history_sort: ui::SortState::new(HistorySortKey::Date, ui::SortDir::Desc),
             services_list: Vec::new(),
             svc_filter: String::new(),
+            svc_sort: ui::SortState::new(ServiceSortKey::Name, ui::SortDir::Asc),
+            svc_selected: Vec::new(),
             report_opts: pages_report::ReportOptions::default(),
             report_path: format!("{home}/debutility-report.html"),
             disk_analyzer_path: home.clone(),
@@ -892,7 +1002,7 @@ impl App {
 
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("Pulisci selezionati"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Pulisci selezionati"), self.action_enabled()).clicked() {
                 let kinds: Vec<cleaner::Kind> =
                     self.items.iter().filter(|i| i.selected).map(|i| i.kind).collect();
                 let has_browser_data = kinds.contains(&cleaner::Kind::BrowserData);
@@ -926,11 +1036,11 @@ impl App {
                 for item in items_to_show {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&item.name).strong().size(14.0));
-                            ui.label(egui::RichText::new(&item.description).color(ui::text_dim()));
+                            ui.label(egui::RichText::new(tr(&item.name)).strong().size(14.0));
+                            ui.label(egui::RichText::new(tr(&item.description)).color(ui::text_dim()));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_enabled(!self.busy, egui::Button::new(t("Disattiva e Blocca"))).clicked() {
+                            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Disattiva e Blocca"))).clicked() {
                                 let target = item.target.clone();
                                 self.spawn(ctx, move |ch| {
                                     ch.send(Msg::Log(format!("▶ Disattivo il demone {}...", target)));
@@ -953,14 +1063,21 @@ impl App {
         ui.add_space(5.0);
 
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Blocco Rapido Domini di Telemetria (Hosts)")).strong().size(16.0).color(ui::accent_text()));
-            ui.label(t("Impedisci al sistema di contattare server noti di telemetria di grandi produttori bloccandoli a livello locale."));
+            ui.label(
+                egui::RichText::new(t("Blocco Rapido Domini di Telemetria (Hosts)"))
+                    .strong()
+                    .size(16.0)
+                    .color(ui::accent_text()),
+            );
+            ui.label(t(
+                "Impedisci al sistema di contattare server noti di telemetria di grandi produttori bloccandoli a livello locale.",
+            ));
             ui.add_space(3.0);
 
             let telemetry_domains = vec![
-                ("Telemetry Microsoft (vortex.data.microsoft.com)", "vortex.data.microsoft.com"),
-                ("Telemetria Errori Ubuntu (collector.ubuntu.com)", "collector.ubuntu.com"),
-                ("Telemetria Nvidia (gfwsl.geforce.com)", "gfwsl.geforce.com"),
+                (t("Telemetry Microsoft (vortex.data.microsoft.com)"), "vortex.data.microsoft.com"),
+                (t("Telemetria Errori Ubuntu (collector.ubuntu.com)"), "collector.ubuntu.com"),
+                (t("Telemetria Nvidia (gfwsl.geforce.com)"), "gfwsl.geforce.com"),
             ];
 
             for (label_text, domain) in telemetry_domains {
@@ -990,6 +1107,18 @@ impl App {
         F: FnOnce(&Chan) + Send + 'static,
     {
         if self.busy {
+            // Invece di scartare l'azione, la mettiamo in coda: verrà avviata
+            // da `drain` quando l'operazione corrente invierà `Busy(false)`.
+            if self.job_queue.len() < MAX_QUEUED_JOBS {
+                let label = t(page_title(self.page)).to_string();
+                self.job_queue.push_back(QueuedJob { label, job: Box::new(f) });
+                self.log.push_str(&tf("Operazione accodata: {}", &[&t(page_title(self.page))]));
+                self.log.push('\n');
+                ctx.request_repaint();
+            } else {
+                self.log.push_str(t("Coda operazioni piena: attendi il completamento di quelle in corso."));
+                self.log.push('\n');
+            }
             return;
         }
         self.busy = true;
@@ -1005,6 +1134,23 @@ impl App {
             }
             ch.send(Msg::Busy(false));
         });
+    }
+
+    /// I pulsanti delle operazioni restano azionabili mentre un altro job gira:
+    /// l'azione viene semplicemente accodata e serializzata da `spawn`.
+    pub(crate) fn action_enabled(&self) -> bool {
+        self.job_queue.len() < MAX_QUEUED_JOBS
+    }
+
+    /// Annulla soltanto i job in attesa: quello in esecuzione continua fino
+    /// alla fine, senza interruzioni brusche di processi di sistema.
+    pub(crate) fn cancel_queued(&mut self) {
+        let n = self.job_queue.len();
+        self.job_queue.clear();
+        if n > 0 {
+            self.log.push_str(&tf("Operazioni in attesa annullate: {}", &[&n]));
+            self.log.push('\n');
+        }
     }
 
     pub fn bg<F>(&self, ctx: &egui::Context, f: F)
@@ -1025,7 +1171,7 @@ impl App {
         privileged: bool,
         confirm: Option<&str>,
     ) {
-        if ui.add_enabled(!self.busy, egui::Button::new(label)).clicked() {
+        if ui.add_enabled(self.action_enabled(), egui::Button::new(label)).clicked() {
             let job = cmd_job(key, script.to_string(), privileged);
             match confirm {
                 Some(t) => self.confirm = Some((t.to_string(), job)),
@@ -1161,7 +1307,7 @@ impl App {
         confirm: Option<&str>,
     ) {
         let job = self.with_snapshot(cmd_job(key, script.to_string(), privileged));
-        if ui.add_enabled(!self.busy, egui::Button::new(label)).clicked() {
+        if ui.add_enabled(self.action_enabled(), egui::Button::new(label)).clicked() {
             match confirm {
                 Some(t) => self.confirm = Some((t.to_string(), job)),
                 None => self.spawn(ctx, job),
@@ -1200,7 +1346,7 @@ impl App {
                     let (badge, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
                     ui::icon_badge(ui.painter(), badge, ui::ACCENT, "⟳", 16.0);
                     ui.add_space(2.0);
-                    ui.label(egui::RichText::new(&p.label).strong().size(16.0));
+                    ui.label(egui::RichText::new(tr(&p.label)).strong().size(16.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(pct) = p.percent() {
                             ui.label(egui::RichText::new(format!("{pct}%")).strong().size(17.0).color(ui::accent_text()));
@@ -1222,7 +1368,7 @@ impl App {
                 ui.add(bar);
                 if !p.detail.is_empty() {
                     ui.add_space(2.0);
-                    ui.label(egui::RichText::new(p.detail.as_str()).color(ui::text_dim()).size(12.5));
+                    ui.label(egui::RichText::new(tr(&p.detail)).color(ui::text_dim()).size(12.5));
                 }
             });
             ui.add_space(3.0);
@@ -1250,7 +1396,7 @@ impl App {
             .find(|p| !p.done)
             .and_then(|p| p.fraction)
             .or_else(|| active.first().and_then(|p| p.fraction));
-        let width = (ui.available_width() * 0.22).clamp(140.0, 300.0);
+        let width = (ui.available_width() * 0.22).clamp(80.0, 300.0).min(ui.available_width().max(60.0));
         let bar = ui::progress_bar(fraction.unwrap_or(0.0))
             .desired_width(width)
             .desired_height(12.0)
@@ -1261,8 +1407,68 @@ impl App {
             bar.text(t("In corso..."))
         };
         ui.add(bar);
-        ui.label(egui::RichText::new(labels).color(ui::text_dim()).size(12.0));
+        ui.label(egui::RichText::new(tr(&labels)).color(ui::text_dim()).size(12.0));
         active.iter().any(|p| !p.done)
+    }
+
+    /// Pannello discreto della coda: compare solo con operazioni attive o in
+    /// attesa. I pending possono essere annullati senza toccare il job in corso.
+    fn queue_ui(&mut self, ctx: &egui::Context) {
+        if !self.busy && self.job_queue.is_empty() {
+            return;
+        }
+        let running: Vec<String> = self
+            .progress
+            .values()
+            .filter(|p| p.visible() && !p.done)
+            .map(|p| tr(&p.label))
+            .collect();
+        let pending = self.job_queue.len();
+        if running.is_empty() && pending == 0 {
+            return;
+        }
+        let preview: Vec<String> = self.job_queue.iter().take(2).map(|q| q.label.clone()).collect();
+        let mut cancel = false;
+        let bg = ui::sidebar_bg(ctx);
+        egui::TopBottomPanel::bottom("queue")
+            .frame(
+                egui::Frame::default()
+                    .fill(bg)
+                    .inner_margin(egui::Margin::symmetric(10.0, 4.0))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        if ui::is_dark() { egui::Color32::from_white_alpha(10) } else { egui::Color32::from_rgb(216, 224, 233) },
+                    )),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.label(
+                        egui::RichText::new(t("Coda operazioni"))
+                            .strong()
+                            .size(12.5)
+                            .color(ui::accent_text()),
+                    );
+                    let current = if running.is_empty() { t("In corso").to_string() } else { running.join(" + ") };
+                    ui.label(egui::RichText::new(tf("In corso: {}", &[&current])).size(12.0));
+                    if pending > 0 {
+                        ui.label(
+                            egui::RichText::new(tf("In attesa: {}", &[&pending]))
+                                .size(12.0)
+                                .color(ui::text_dim()),
+                        );
+                        if !preview.is_empty() {
+                            ui.label(egui::RichText::new(preview.join(", ")).size(11.5).color(ui::text_dim()));
+                        }
+                        if ui.button(t("Annulla le operazioni in attesa")).clicked() {
+                            cancel = true;
+                        }
+                    }
+                });
+            });
+        if cancel {
+            self.cancel_queued();
+        }
     }
 
     /// `true` mentre gira un'operazione con avanzamento (anche in background).
@@ -1314,7 +1520,7 @@ impl App {
                         );
                         ch.send(Msg::Log("▶ Scansione spazio disco in corso...".into()));
                         let items = pages_disk_analyzer::scan_directory_with(&p, |i, name| {
-                            prog.status(format!("{name} — {i} elementi"))
+                            prog.status(tf("{} — {} elementi", &[&name, &i]))
                         });
                         ch.send(Msg::DiskAnalyzerItems(items));
                         prog.finish(t("Scansione completata"));
@@ -1362,6 +1568,7 @@ impl App {
                     prog.finish(t("Pulizia della quarantena completata"));
                 });
             }
+            Page::RestoreHistory => self.refresh_restore_history(ctx, false),
             Page::SystemEditor => {
                 if self.system_editor.content.is_empty() {
                     self.system_editor.load_file("/etc/fstab");
@@ -1420,17 +1627,17 @@ impl App {
         });
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("Pulisci selezionati"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Pulisci selezionati"), self.action_enabled()).clicked() {
                 let kinds: Vec<cleaner::Kind> =
                     self.items.iter().filter(|i| i.selected).map(|i| i.kind).collect();
                 let job = clean_and_scan_job("cleaner", kinds, false);
                 self.spawn_snapshot(ctx, job);
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Analizza"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Analizza"))).clicked() {
                 self.spawn(ctx, scan_sizes_job("cleaner", t("Analisi spazio in corso...")));
             }
             
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Ottimizza database SQLite browser"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Ottimizza database SQLite browser"))).clicked() {
                 self.spawn(ctx, |ch| {
                     let mut prog = ProgressReporter::start(
                         &ch,
@@ -1495,6 +1702,14 @@ impl App {
                         }
                         self.dev_progress = None;
                         self.kb_progress = None;
+                        // Turno successivo della coda FIFO: il job in corso è
+                        // terminato (anche in caso di panic), si può partire
+                        // con il primo in attesa senza sovrapporre processi.
+                        if let Some(next) = self.job_queue.pop_front() {
+                            self.log.push_str(&tf("Avvio: {}", &[&next.label]));
+                            self.log.push('\n');
+                            self.spawn(ctx, next.job);
+                        }
                     }
                 }
                 Msg::Progress(p) => {
@@ -1552,10 +1767,14 @@ impl App {
                  self.gpg_keys = list;
                 }
                 Msg::Procs(p) => {
+                    self.proc_selected.retain(|pid| p.iter().any(|row| row.pid == *pid));
                     self.procs = p;
                     self.proc_pending = false;
                 }
-                Msg::Pkgs(p) => self.pkgs = p,
+                Msg::Pkgs(p) => {
+                    self.pkg_selected.retain(|n| p.iter().any(|pkg| pkg.name == *n));
+                    self.pkgs = p;
+                }
                 Msg::BigFiles(b) => self.bigfiles = b,
                 Msg::Kernels(k) => self.kernels = k,
                 Msg::Startup(s) => self.startup = s,
@@ -1621,7 +1840,10 @@ impl App {
                 Msg::ConfigBackups(list) => self.config_backups = list,
                 Msg::DisabledSnaps(list) => self.disabled_snaps = list,
                 Msg::Duplicates(list) => self.dup_groups = list,
-                Msg::Services(list) => self.services_list = list,
+                Msg::Services(list) => {
+                    self.svc_selected.retain(|n| list.iter().any(|s| s.name == *n));
+                    self.services_list = list;
+                }
                 Msg::DiskAnalyzerItems(items) => self.disk_analyzer_items = items, 
                 Msg::DiskAnalyzerPath(path) => self.disk_analyzer_path = path,
                 Msg::Picked(None) => {
@@ -1729,6 +1951,24 @@ impl App {
                     self.restore_msg = Some((msg.clone(), is_error));
                     self.log.push_str(&format!("{} {}\n", if is_error { "✘" } else { "✔" }, msg));
                 }
+                Msg::RestoreHistoryItems(entries, restricted) => {
+                    self.restore_history_selected = self
+                        .restore_history_selected
+                        .take()
+                        .filter(|id| entries.iter().any(|e| e.id == *id));
+                    self.restore_history_restricted = restricted;
+                    self.restore_history_entries = entries;
+                }
+                Msg::RestoreHistoryRemoved(id) => {
+                    self.restore_history_entries.retain(|e| e.id != id);
+                    if self.restore_history_selected.as_deref() == Some(id.as_str()) {
+                        self.restore_history_selected = None;
+                    }
+                }
+                Msg::RestoreHistoryMessage(msg, is_error) => {
+                    self.restore_history_msg = Some((msg.clone(), is_error));
+                    self.log.push_str(&format!("{} {}\n", if is_error { "✘" } else { "✔" }, msg));
+                }
            }
         }
         
@@ -1742,8 +1982,8 @@ impl App {
         );
 
         ui.add_space(3.0);
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Ricarica Storico"))).clicked() {
+        ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Ricarica Storico"))).clicked() {
                 match history::load_apt_history() {
                     Ok(h) => self.apt_history = h,
                     Err(e) => self.log.push_str(&format!("Errore: {e}\n")),
@@ -1768,12 +2008,49 @@ impl App {
             return;
         }
 
+        let total = self.apt_history.len();
+        let f = self.history_filter.to_lowercase();
+        let mut rows: Vec<history::AptTransaction> = self
+            .apt_history
+            .iter()
+            .filter(|tx| {
+                if f.is_empty() {
+                    return true;
+                }
+                tx.start_date.to_lowercase().contains(&f)
+                    || tx.end_date.to_lowercase().contains(&f)
+                    || tx.command_line.to_lowercase().contains(&f)
+                    || tx.installed.join(" ").to_lowercase().contains(&f)
+                    || tx.upgraded.join(" ").to_lowercase().contains(&f)
+                    || tx.removed.join(" ").to_lowercase().contains(&f)
+            })
+            .cloned()
+            .collect();
+
+        rows.sort_by(|a, b| {
+            let ord = match self.history_sort.key {
+                HistorySortKey::Date => a.start_date.cmp(&b.start_date),
+                HistorySortKey::Command => ui::cmp_alpha(&a.command_line, &b.command_line),
+            };
+            match self.history_sort.dir {
+                ui::SortDir::Asc => ord,
+                ui::SortDir::Desc => ord.reverse(),
+            }
+        });
+
+        ui::filter_bar(ui, &mut self.history_filter, rows.len(), total);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(t("Ordina per:")).color(ui::text_dim()));
+            ui::sort_header(ui, t("Data/Ora"), HistorySortKey::Date, &mut self.history_sort);
+            ui::sort_header(ui, t("Comando"), HistorySortKey::Command, &mut self.history_sort);
+        });
+
         let mut rollback_cmd: Option<(String, String)> = None;
 
         egui::ScrollArea::vertical().max_height(340.0).show(ui, |ui| {
-            for tx in &self.apt_history {
+            for tx in &rows {
                 ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new(&tx.start_date).strong().color(ui::accent_text()).size(16.0));
                         if !tx.end_date.is_empty() {
                             ui.label(
@@ -1786,7 +2063,7 @@ impl App {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
                                     .add_enabled(
-                                        !self.busy,
+                                        self.action_enabled(),
                                         egui::Button::new(
                                             egui::RichText::new(t("Annulla operazione")).color(ui::semantic_text(ui::WARN)),
                                         ),
@@ -1857,7 +2134,7 @@ impl App {
 
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Scansiona tutto"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Scansiona tutto"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     let mut prog = ProgressReporter::start(
                         &ch,
@@ -1896,7 +2173,7 @@ impl App {
                     ui.checkbox(selected, pkg.as_str());
                 }
                 ui.add_space(3.0);
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Pulisci pacchetti RC selezionati"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Pulisci pacchetti RC selezionati"))).clicked() {
                     let targets: Vec<String> = self.rc_pkgs.iter().filter(|(_, sel)| *sel).map(|(p, _)| p.clone()).collect();
                     let args_str = targets.iter().map(|s| util::shq(s)).collect::<Vec<_>>().join(" ");
                     let script = format!("apt-get purge -y {args_str}");
@@ -1920,7 +2197,7 @@ impl App {
                     }
                 });
                 ui.add_space(3.0);
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Sposta in quarantena i backup selezionati"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Sposta in quarantena i backup selezionati"))).clicked() {
                     let targets: Vec<std::path::PathBuf> = self.config_backups
                         .iter()
                         .filter(|(_, sel)| *sel)
@@ -1962,7 +2239,7 @@ impl App {
             ui.label(egui::RichText::new(t("Kit di Migrazione (1-Click)")).strong().size(18.0));
             ui.label(t("Esporta l'intero profilo della macchina in un unico archivio compresso (.tar.gz) contenente pacchetti APT manuali, app Flatpak installate, repository aggiuntivi, lanciatori utente e configurazioni dei Window Manager, includendo uno script automatico per ripristinare tutto sul nuovo sistema."));
             ui.add_space(3.0);
-            if ui::primary_button(ui, t("Crea Kit di Migrazione"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Crea Kit di Migrazione"), self.action_enabled()).clicked() {
                 let mut dest = std::path::PathBuf::from(crate::util::home()).join("Desktop");
                 if let Ok(out) = std::process::Command::new("xdg-user-dir").arg("DESKTOP").output() {
                     if out.status.success() {
@@ -2005,7 +2282,7 @@ impl App {
                     ui.checkbox(selected, item.as_str());
                 }
                 ui.add_space(3.0);
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Rimuovi Flatpak inutilizzati"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Rimuovi Flatpak inutilizzati"))).clicked() {
                     let targets: Vec<String> = self
                         .flatpak_unused
                         .iter()
@@ -2039,7 +2316,7 @@ impl App {
                     ui.checkbox(selected, item.as_str());
                 }
                 ui.add_space(3.0);
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Rimuovi revisioni Snap selezionate"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Rimuovi revisioni Snap selezionate"))).clicked() {
                     let targets: Vec<String> = self.disabled_snaps.iter().filter(|(_, sel)| *sel).map(|(s, _)| s.clone()).collect();
                     let job: Job = Box::new(move |ch: &Chan| {
                         ch.send(Msg::Log("▶ Rimozione vecchie revisioni Snap...".into()));
@@ -2070,7 +2347,7 @@ impl App {
                     }
                 });
                 ui.add_space(3.0);
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Elimina configurazioni orfane selezionate"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Elimina configurazioni orfane selezionate"))).clicked() {
                     let targets: Vec<std::path::PathBuf> = self.orphan_configs.iter().filter(|(_, sel)| *sel).map(|(p, _)| p.clone()).collect();
                     if !targets.is_empty() {
                         let n_targets = targets.len();
@@ -2082,7 +2359,7 @@ impl App {
                             ch.send(Msg::Log(format!("{mark} Rimozione configurazioni orfane terminata{}.", if ok { "" } else { " (alcune non rimosse)" })));
                         });
                         self.confirm_snapshot(
-                            format!("Eliminare definitivamente {} cartelle di configurazione in ~/.config? Le impostazioni dei programmi andranno perse.", n_targets),
+                            tf("Eliminare definitivamente {} cartelle di configurazione in ~/.config? Le impostazioni dei programmi andranno perse.", &[&n_targets]),
                             job,
                         );
                     }
@@ -2100,7 +2377,7 @@ impl App {
 
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Aggiorna tutti gli Snap"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna tutti gli Snap"))).clicked() {
                 let job: Job = Box::new(move |ch: &Chan| {
                     ch.send(Msg::Log("▶ Aggiorno tutti i pacchetti Snap...".into()));
                     match snap::refresh_snap(None) {
@@ -2137,7 +2414,7 @@ impl App {
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if ui
                                         .add_enabled(
-                                            !self.busy,
+                                            self.action_enabled(),
                                             egui::Button::new(
                                                 egui::RichText::new(t("Rimuovi")).color(ui::semantic_text(ui::BAD)),
                                             ),
@@ -2196,13 +2473,15 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         .and_then(|s| s.split_whitespace().next()?.parse::<f32>().ok())
         .unwrap_or(0.0);
     let load_per_core = load1 / cores;
+    let cpu = format!("{cpu_pct:.0}");
+    let load = format!("{load1:.2}");
 
     if cpu_pct >= 80.0 || load_per_core >= 1.5 {
         out.push(SlowDiagFinding {
             area: "CPU",
             severity: SlowSeverity::Bad,
-            summary: format!("CPU sotto carico elevato ({cpu_pct:.0}% · load 1m: {load1:.2})"),
-            detail: "Uno o più processi stanno impegnando il processore o la coda di esecuzione è satura.".into(),
+            summary: tf("CPU sotto carico elevato ({}% · load 1m: {})", &[&cpu, &load]),
+            detail: t("Uno o più processi stanno impegnando il processore o la coda di esecuzione è satura.").to_string(),
             action_label: "Apri Processi",
             target_page: Page::Procs,
         });
@@ -2210,8 +2489,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "CPU",
             severity: SlowSeverity::Warn,
-            summary: format!("Attività CPU moderata/alta ({cpu_pct:.0}% · load 1m: {load1:.2})"),
-            detail: "Controlla i processi attivi se noti micro-blocchi nell'interfaccia.".into(),
+            summary: tf("Attività CPU moderata/alta ({}% · load 1m: {})", &[&cpu, &load]),
+            detail: t("Controlla i processi attivi se noti micro-blocchi nell'interfaccia.").to_string(),
             action_label: "Apri Processi",
             target_page: Page::Procs,
         });
@@ -2219,8 +2498,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "CPU",
             severity: SlowSeverity::Ok,
-            summary: format!("CPU regolare ({cpu_pct:.0}% · load 1m: {load1:.2})"),
-            detail: "Nessuna saturazione del processore rilevata.".into(),
+            summary: tf("CPU regolare ({}% · load 1m: {})", &[&cpu, &load]),
+            detail: t("Nessuna saturazione del processore rilevata.").to_string(),
             action_label: "Dettagli Processi",
             target_page: Page::Procs,
         });
@@ -2237,17 +2516,15 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
     } else {
         0.0
     };
+    let ram = format!("{:.0}", ram_frac * 100.0);
+    let swap = format!("{:.0}", swap_frac * 100.0);
 
     if ram_frac >= 0.88 || swap_frac >= 0.65 {
         out.push(SlowDiagFinding {
             area: "Memoria",
             severity: SlowSeverity::Bad,
-            summary: format!(
-                "Memoria quasi satura (RAM {:.0}% · Swap {:.0}%)",
-                ram_frac * 100.0,
-                swap_frac * 100.0
-            ),
-            detail: "L'uso intenso della swap rallenta sensibilmente l'apertura delle app e il cambio finestra.".into(),
+            summary: tf("Memoria quasi satura (RAM {}% · Swap {}%)", &[&ram, &swap]),
+            detail: t("L'uso intenso della swap rallenta sensibilmente l'apertura delle app e il cambio finestra.").to_string(),
             action_label: "Ottimizza RAM / Zram",
             target_page: Page::Zram,
         });
@@ -2255,12 +2532,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "Memoria",
             severity: SlowSeverity::Warn,
-            summary: format!(
-                "Uso memoria sostenuto (RAM {:.0}% · Swap {:.0}%)",
-                ram_frac * 100.0,
-                swap_frac * 100.0
-            ),
-            detail: "Valuta di chiudere programmi pesanti o configurare Zram per ridurre lo swap su disco.".into(),
+            summary: tf("Uso memoria sostenuto (RAM {}% · Swap {}%)", &[&ram, &swap]),
+            detail: t("Valuta di chiudere programmi pesanti o configurare Zram per ridurre lo swap su disco.").to_string(),
             action_label: "Apri Ottimizza RAM",
             target_page: Page::Zram,
         });
@@ -2268,8 +2541,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "Memoria",
             severity: SlowSeverity::Ok,
-            summary: format!("RAM disponibile ({:.0}% in uso)", ram_frac * 100.0),
-            detail: "Margine di memoria adeguato per il funzionamento fluido.".into(),
+            summary: tf("RAM disponibile ({}% in uso)", &[&ram]),
+            detail: t("Margine di memoria adeguato per il funzionamento fluido.").to_string(),
             action_label: "Dettagli RAM",
             target_page: Page::Zram,
         });
@@ -2305,8 +2578,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "Disco",
             severity: if pct >= 94 { SlowSeverity::Bad } else { SlowSeverity::Warn },
-            summary: format!("Spazio su disco quasi esaurito su {mnt} ({pct}%)"),
-            detail: "Con poco spazio libero il file system e la cache di sistema possono subire rallentamenti.".into(),
+            summary: tf("Spazio su disco quasi esaurito su {} ({})", &[&mnt, &pct]),
+            detail: t("Con poco spazio libero il file system e la cache di sistema possono subire rallentamenti.").to_string(),
             action_label: "Analizza Spazio",
             target_page: Page::DiskAnalyzer,
         });
@@ -2314,8 +2587,8 @@ fn run_slow_diag(info: &info::SysInfo) -> Vec<SlowDiagFinding> {
         out.push(SlowDiagFinding {
             area: "Disco",
             severity: SlowSeverity::Ok,
-            summary: "Spazio su disco nella norma".into(),
-            detail: "Nessuna partizione critica vicina alla saturazione.".into(),
+            summary: t("Spazio su disco nella norma").to_string(),
+            detail: t("Nessuna partizione critica vicina alla saturazione.").to_string(),
             action_label: "Apri Disco",
             target_page: Page::Disk,
         });
@@ -2337,8 +2610,8 @@ procs.sort_by(|a, b| {
     });
     let top_info = procs
         .first()
-        .map(|p| format!("{} (CPU {}%, RAM {}%)", p.cmd, p.cpu, p.mem))
-        .unwrap_or_else(|| "nessun dato".into());
+        .map(|p| tf("{} (CPU {}%, RAM {}%)", &[&p.cmd, &p.cpu, &p.mem]))
+        .unwrap_or_else(|| t("nessun dato").to_string());
 
     let failed_units: Vec<String> = std::process::Command::new("systemctl")
         .args(["--failed", "--no-legend", "--plain"])
@@ -2357,10 +2630,10 @@ procs.sort_by(|a, b| {
         out.push(SlowDiagFinding {
             area: "Servizi",
             severity: SlowSeverity::Warn,
-            summary: format!("{} servizio/i systemd in stato failed", failed_units.len()),
-            detail: format!(
-                "Unità: {}. Processo più attivo: {top_info}",
-                failed_units.join(", ")
+            summary: tf("{} servizio/i systemd in stato failed", &[&failed_units.len()]),
+            detail: tf(
+                "Unità: {}. Processo più attivo: {}",
+                &[&failed_units.join(", "), &top_info]
             ),
             action_label: "Apri Servizi",
             target_page: Page::Services,
@@ -2369,8 +2642,8 @@ procs.sort_by(|a, b| {
         out.push(SlowDiagFinding {
             area: "Processi",
             severity: SlowSeverity::Ok,
-            summary: format!("Processo principale: {top_info}"),
-            detail: "Nessun servizio systemd in errore rilevato.".into(),
+            summary: tf("Processo principale: {}", &[&top_info]),
+            detail: t("Nessun servizio systemd in errore rilevato.").to_string(),
             action_label: "Apri Processi",
             target_page: Page::Procs,
         });
@@ -2383,7 +2656,7 @@ impl App {
     pub fn ui_slow_diag(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, goto: &mut Option<Page>) {
         ui::card_compact(ui, |ui| {
             let avail_w = ui.available_width();
-            let text_w = (avail_w - 180.0).max(200.0);
+            let text_w = (avail_w * 0.62).max(180.0).min(avail_w);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.vertical(|ui| {
@@ -2401,7 +2674,7 @@ impl App {
                     if self.busy {
                         ui.spinner();
                     }
-                    if ui::primary_button_compact(ui, t("Diagnostica ora"), !self.busy).clicked() {
+                    if ui::primary_button_compact(ui, t("Diagnostica ora"), self.action_enabled()).clicked() {
                         self.info.refresh();
                         self.spawn(ctx, move |ch| {
                             let mut prog = ProgressReporter::start(
@@ -2435,19 +2708,19 @@ impl App {
             ui.add_space(2.0);
             for f in self.slow_diag.clone() {
                 let (badge, col) = match f.severity {
-                    SlowSeverity::Ok => ("OK", ui::GOOD),
-                    SlowSeverity::Warn => ("ATTENZIONE", ui::WARN),
-                    SlowSeverity::Bad => ("CRITICO", ui::BAD),
+                    SlowSeverity::Ok => (t("OK"), ui::GOOD),
+                    SlowSeverity::Warn => (t("ATTENZIONE"), ui::WARN),
+                    SlowSeverity::Bad => (t("CRITICO"), ui::BAD),
                 };
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    ui.colored_label(col, egui::RichText::new(format!("[{badge}]")).strong().size(12.0));
-                    ui.label(egui::RichText::new(f.area).strong().size(12.0));
-                    let summary = ui.label(egui::RichText::new(&f.summary).size(12.0));
-                    let _ = summary.on_hover_text(f.detail.as_str());
+                    ui.colored_label(col, egui::RichText::new(format!("[{}]", tr(badge))).strong().size(12.0));
+                    ui.label(egui::RichText::new(tr(f.area)).strong().size(12.0));
+                    let summary = ui.label(egui::RichText::new(tr(&f.summary)).size(12.0));
+                    let _ = summary.on_hover_text(tr(&f.detail));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = egui::Button::new(egui::RichText::new(t(f.action_label)).size(12.0));
-                        if ui.add_enabled(!self.busy, btn).clicked() {
+                        if ui.add_enabled(self.action_enabled(), btn).clicked() {
                             *goto = Some(f.target_page);
                         }
                     });
@@ -2477,7 +2750,7 @@ impl App {
         ui::card(ui, |ui| {
             ui.label(egui::RichText::new(t("Percorso file di destinazione:")).strong());
             ui.add_space(2.0);
-            ui.add(egui::TextEdit::singleline(&mut self.report_path).desired_width(f32::INFINITY));
+            ui.add(egui::TextEdit::singleline(&mut self.report_path).desired_width(ui::fit_width(ui, 420.0, 160.0)));
             ui.add_space(4.0);
 
             ui.horizontal(|ui| {
@@ -2486,7 +2759,7 @@ impl App {
                     || self.report_opts.packages
                     || self.report_opts.logs;
 
-                if ui::primary_button(ui, t("Genera Report HTML"), !self.busy && any_selected).clicked() {
+                if ui::primary_button(ui, t("Genera Report HTML"), self.action_enabled() && any_selected).clicked() {
                     let opts = self.report_opts.clone();
                     let path = util::expand_path(&self.report_path);
                     self.spawn(ctx, move |ch| {
@@ -2697,11 +2970,11 @@ impl App {
         );
 
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(t("Percorso da analizzare:")).strong());
-                ui.add(egui::TextEdit::singleline(&mut self.disk_analyzer_path).desired_width(400.0));
+                ui.add(egui::TextEdit::singleline(&mut self.disk_analyzer_path).desired_width(ui::fit_width(ui, 400.0, 140.0)));
 
-                if ui.add_enabled(!self.busy, egui::Button::new(t("Sfoglia..."))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Sfoglia..."))).clicked() {
                     let ctx_clone = ctx.clone();
                     let tx_clone = self.tx.clone();
                     std::thread::spawn(move || {
@@ -2727,7 +3000,7 @@ impl App {
                     });
                 }
 
-                if ui::primary_button(ui, t("Scansiona"), !self.busy).clicked() {
+                if ui::primary_button(ui, t("Scansiona"), self.action_enabled()).clicked() {
                     let path = util::expand_path(&self.disk_analyzer_path);
                     self.spawn(ctx, move |ch| {
                         let mut prog = ProgressReporter::start(
@@ -2737,7 +3010,7 @@ impl App {
                         );
                         ch.send(Msg::Log(format!("▶ Scansione di {path} in corso...")));
                         let items = pages_disk_analyzer::scan_directory_with(&path, |i, name| {
-                            prog.status(format!("{name} — {i} elementi"))
+                            prog.status(tf("{} — {} elementi", &[&name, &i]))
                         });
                         ch.send(Msg::DiskAnalyzerItems(items));
                         ch.send(Msg::Log("✔ Scansione completata.".into()));
@@ -2745,7 +3018,7 @@ impl App {
                     });
                 }
 
-if ui.add_enabled(!self.busy, egui::Button::new(t("Analisi approfondita"))).clicked() {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Analisi approfondita"))).clicked() {
                     let path = util::expand_path(&self.disk_analyzer_path);
                     self.disk_before_free = pages_disk_analyzer::available_bytes_for_path(&path);
                     self.disk_before_path = self.disk_before_free.map(|_| path.clone());
@@ -2757,7 +3030,7 @@ if ui.add_enabled(!self.busy, egui::Button::new(t("Analisi approfondita"))).clic
                         );
                         ch.send(Msg::Log(format!("▶ Analisi cache e file grandi recenti in {path}...")));
                         let deep = pages_disk_analyzer::scan_deep_analysis_with(&path, 100, 14, |name| {
-                            prog.status(format!("Analisi di {name}"))
+                            prog.status(tf("Analisi di {}", &[&name]))
                         });
                         ch.send(Msg::DiskDeepScan(deep));
                         ch.send(Msg::Log("✔ Analisi approfondita completata.".into()));
@@ -2778,7 +3051,7 @@ if ui.add_enabled(!self.busy, egui::Button::new(t("Analisi approfondita"))).clic
                 ui.label(t("Nessun risultato. Inserisci un percorso e premi 'Scansiona'."));
             } else {
                 let total_size: u64 = self.disk_analyzer_items.iter().map(|i| i.size).sum();
-                ui.label(egui::RichText::new(format!("Spazio totale rilevato: {}", pages_disk_analyzer::fmt_bytes(total_size))).strong().color(ui::accent_text()));
+                ui.label(egui::RichText::new(tf("Spazio totale rilevato: {}", &[&pages_disk_analyzer::fmt_bytes(total_size)])).strong().color(ui::accent_text()));
                 ui.add_space(3.0);
                 let items = self.disk_analyzer_items.clone();
                 egui::ScrollArea::vertical().max_height(310.0).show(ui, |ui| {
@@ -2796,7 +3069,7 @@ if ui.add_enabled(!self.busy, egui::Button::new(t("Analisi approfondita"))).clic
                                         t("Scansione cartella in corso..."),
                                     );
                                     let items = pages_disk_analyzer::scan_directory_with(&path, |i, name| {
-                                        prog.status(format!("{name} — {i} elementi"))
+                                        prog.status(tf("{} — {} elementi", &[&name, &i]))
                                     });
                                     ch.send(Msg::DiskAnalyzerItems(items));
                                     prog.finish(t("Scansione completata"));
@@ -2827,12 +3100,20 @@ ui.add_space(4.0);
                 let max_sz = self.disk_deep.heavy_caches.iter().map(|c| c.size).max().unwrap_or(1).max(1) as f32;
                 for c in &self.disk_deep.heavy_caches {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&c.label).strong());
+                        ui.label(egui::RichText::new(tr(&c.label)).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(egui::RichText::new(pages_disk_analyzer::fmt_bytes(c.size)).strong().color(ui::accent_text()));
                         });
                     });
-                    ui.add(egui::ProgressBar::new((c.size as f32 / max_sz).clamp(0.0, 1.0)));
+                    {
+                        let fill = ui::ACCENT;
+                        let text_color = ui::progress_text_color(fill);
+                        ui.scope(|ui| {
+                            ui.visuals_mut().override_text_color = Some(text_color);
+                            ui.visuals_mut().selection.stroke.color = text_color;
+                            ui.add(egui::ProgressBar::new((c.size as f32 / max_sz).clamp(0.0, 1.0)).fill(fill));
+                        });
+                    }
                     ui.label(egui::RichText::new(&c.path).color(ui::text_dim()));
                     ui.add_space(3.0);
                 }
@@ -2868,7 +3149,7 @@ ui.add_space(4.0);
                 ui.label(egui::RichText::new(t("Confronto spazio Prima / Dopo")).strong().size(16.0).color(ui::accent_text()));
                 if let Some(before) = self.disk_before_free {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add_enabled(!self.busy, egui::Button::new(t("Misura spazio Dopo"))).clicked() {
+                        if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Misura spazio Dopo"))).clicked() {
                             let path = self.disk_before_path.clone().unwrap_or_else(|| util::expand_path(&self.disk_analyzer_path));
                             if let Some(comp) = pages_disk_analyzer::build_space_comparison(&path, before) {
                                 self.disk_comparison = Some(comp);
@@ -2924,7 +3205,7 @@ ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(t("Cartella:")).strong());
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.treemap_input).desired_width(420.0),
+                    egui::TextEdit::singleline(&mut self.treemap_input).desired_width(ui::fit_width(ui, 420.0, 140.0)),
                 );
                 if ui.button(t("Sfoglia...")).clicked() {
                     let ctx2 = ctx.clone();
@@ -2995,7 +3276,7 @@ ui.add_space(4.0);
                     ui.add(
                         ui::progress_bar(p.fraction.unwrap_or(0.0))
                             .animate(true)
-                            .text(p.detail.clone()),
+                            .text(tr(&p.detail)),
                     );
                 }
             }
@@ -3044,8 +3325,9 @@ ui.add_space(4.0);
             });
             ui.add_space(3.0);
 
+            let map_h = ui.available_height().min(430.0).max(180.0);
             let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 430.0),
+                egui::vec2(ui.available_width(), map_h),
                 egui::Sense::hover(),
             );
             let painter = ui.painter_at(rect);
@@ -3110,7 +3392,7 @@ ui.add_space(4.0);
 
                     let pct = entry.size as f64 * 100.0 / total as f64;
                     resp.clone().on_hover_ui_at_pointer(|tip| {
-                        tip.set_max_width(420.0);
+                        tip.set_max_width(ui::fit_width(ui, 420.0, 220.0));
                         tip.label(egui::RichText::new(&entry.name).strong());
                         tip.label(
                             egui::RichText::new(entry.path.display().to_string())
@@ -3264,7 +3546,7 @@ ui.add_space(4.0);
 
         ui.add_space(3.0);
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("/etc/fstab").clicked() {
                     self.system_editor.load_file("/etc/fstab");
                 }
@@ -3278,7 +3560,7 @@ ui.add_space(4.0);
 
             ui.add_space(3.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("File in modifica: {}", self.system_editor.selected_path)).strong().color(ui::accent_text()));
+                ui.label(egui::RichText::new(tf("File in modifica: {}", &[&self.system_editor.selected_path])).strong().color(ui::accent_text()));
             });
 
             ui.add_space(3.0);
@@ -3286,14 +3568,14 @@ ui.add_space(4.0);
                 ui.add(
                     egui::TextEdit::multiline(&mut self.system_editor.content)
                         .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
+                        .desired_width(ui::fit_width(ui, 640.0, 240.0))
                         .desired_rows(18), // <-- Corretto da .rows(18) a .desired_rows(18)
                 );
             });
 
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-            let can_save = !self.busy && !self.system_editor.saving;
+            ui.horizontal_wrapped(|ui| {
+            let can_save = self.action_enabled() && !self.system_editor.saving;
                 if ui::primary_button(ui, t("Salva con Backup e Validazione"), can_save).clicked() {
                     let path = self.system_editor.selected_path.clone();
                     let content = self.system_editor.content.clone();
@@ -3329,7 +3611,7 @@ fn ui_safe_optimize(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("1. Cosa farà (anteprima sicura)")).strong().size(16.0).color(ui::accent_text()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add_enabled(!self.busy, egui::Button::new(t("Aggiorna anteprima"))).clicked() {
+                    if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna anteprima"))).clicked() {
                         self.safe_preview = safe_optimize::preview_steps();
                         self.safe_report = None;
                     }
@@ -3372,7 +3654,7 @@ fn ui_safe_optimize(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("Ottimizza ora in sicurezza"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Ottimizza ora in sicurezza"), self.action_enabled()).clicked() {
                 self.safe_preview = safe_optimize::preview_steps();
                 self.safe_report = None;
                 self.spawn(ctx, |ch| {
@@ -3532,12 +3814,17 @@ impl eframe::App for App {
 
         let mut next: Option<Page> = None;
         let sidebar_locked = self.operation_in_progress();
+        // Sotto ~1040 px la sidebar diventa una barra di icone: il contenuto
+        // resta leggibile anche a 800×600 e affiancato a metà schermo.
+        let compact_sidebar = ctx.screen_rect().width() < 1040.0;
+        let sidebar_w = if compact_sidebar { 72.0 } else { 260.0 };
+        let sidebar_inner = if compact_sidebar { 6.0 } else { 10.0 };
         egui::SidePanel::left("side")
-            .exact_width(270.0)
+            .exact_width(sidebar_w)
             .resizable(false)
-            .frame(egui::Frame::default().fill(sidebar_bg).inner_margin(egui::Margin::same(10.0)))
+            .frame(egui::Frame::default().fill(sidebar_bg).inner_margin(egui::Margin::same(sidebar_inner)))
             .show(ctx, |ui| {
-                // Testata semplice: logo, nome e un filetto discreto.
+                // Testata: logo sempre, testo solo con sidebar estesa.
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let (logo, _) = ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::hover());
@@ -3546,47 +3833,54 @@ impl eframe::App for App {
                         egui::Image::new(egui::include_image!("../assets/debutility.png"))
                             .max_size(egui::vec2(34.0, 34.0)),
                     );
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-                            ui.label(egui::RichText::new(t("Deb")).size(27.0).strong().color(ui::text_primary()));
-                            ui.label(egui::RichText::new(t("Utility")).size(27.0).strong().color(ui::accent_text()));
+                    if !compact_sidebar {
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                ui.label(egui::RichText::new(t("Deb")).size(27.0).strong().color(ui::text_primary()));
+                                ui.label(egui::RichText::new(t("Utility")).size(27.0).strong().color(ui::accent_text()));
+                            });
+                            ui.label(
+                                egui::RichText::new(format!("v{}", APP_VERSION))
+                                    .size(12.5)
+                                    .strong()
+                                    .color(ui::text_dim()),
+                            );
+                            ui.label(egui::RichText::new(t("Ottimizzatore di sistema")).size(12.0).color(ui::text_dim()));
                         });
-                        ui.label(
-                            egui::RichText::new(format!("v{}", APP_VERSION))
-                                .size(12.5)
-                                .strong()
-                                .color(ui::text_dim()),
-                        );
-                        ui.label(egui::RichText::new(t("Ottimizzatore di sistema")).size(12.0).color(ui::text_dim()));
-                    });
+                    }
                 });
                 let (line, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 2.0), egui::Sense::hover());
                 ui::accent_strip(ui.painter(), line, ui::alpha(ui::ACCENT, 130), egui::Color32::TRANSPARENT);
                 ui.add_space(9.0);
                 if sidebar_locked {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(t("⚠ Operazione in corso: attendi il completamento prima di cambiare scheda."))
-                                .size(12.5)
-                                .color(ui::semantic_text(ui::WARN)),
-                        )
-                        .wrap(),
-                    );
+                    let warning = t("⚠ Operazione in corso: attendi il completamento prima di cambiare scheda.");
+                    if compact_sidebar {
+                        ui.label(egui::RichText::new("⚠").size(18.0).color(ui::semantic_text(ui::WARN)))
+                            .on_hover_text(warning);
+                    } else {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(warning).size(12.5).color(ui::semantic_text(ui::WARN)),
+                        ).wrap());
+                    }
                     ui.add_space(4.0);
                 }
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
                     for (group, entries) in MENU {
                         if !group.is_empty() {
-                            ui.add_space(12.0);
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 7.0;
-                                let (dot, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
-                                ui.painter().circle_filled(dot.center(), 3.0, ui::ACCENT);
-                                ui.label(egui::RichText::new(t(*group)).size(12.0).strong().color(ui::text_dim()));
-                            });
-                            ui.add_space(2.0);
+                            if compact_sidebar {
+                                ui.add_space(8.0);
+                            } else {
+                                ui.add_space(12.0);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 7.0;
+                                    let (dot, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
+                                    ui.painter().circle_filled(dot.center(), 3.0, ui::ACCENT);
+                                    ui.label(egui::RichText::new(t(*group)).size(12.0).strong().color(ui::text_dim()));
+                                });
+                                ui.add_space(2.0);
+                            }
                         }
                         for (p, name) in entries.iter() {
                             let label = t(*name);
@@ -3608,6 +3902,8 @@ impl eframe::App for App {
             self.enter(ctx, p);
         }
 
+        self.queue_ui(ctx);
+
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::default()
@@ -3616,9 +3912,16 @@ impl eframe::App for App {
                     .stroke(egui::Stroke::new(1.0_f32, if ui::is_dark() { egui::Color32::from_white_alpha(12) } else { egui::Color32::from_rgb(203, 213, 225) })),
             )
             .show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if !self.progress_status_ui(ui) && self.busy {
                     ui.spinner();
+                }
+                if !self.job_queue.is_empty() {
+                    ui.label(
+                        egui::RichText::new(tf("In attesa: {}", &[&self.job_queue.len()]))
+                            .size(12.0)
+                            .color(ui::text_dim()),
+                    );
                 }
                 if util::is_root() {
                     let admin_text = format!(" [⚡ {}] ", t("MODALITÀ AMMINISTRATORE"));
@@ -3627,7 +3930,9 @@ impl eframe::App for App {
                 let tail = self.log.get(self.status_from..).unwrap_or("");
                 let last = tail.trim_end().rsplit('\n').next().unwrap_or("");
                 let last = if last.is_empty() { t("Pronto") } else { last };
-                ui.label(egui::RichText::new(last).color(crate::ui::text_dim()));
+                ui.add(
+                    egui::Label::new(egui::RichText::new(last).color(crate::ui::text_dim())).wrap(),
+                );
             });
         });
 
@@ -3651,18 +3956,25 @@ impl eframe::App for App {
                 });
         }
         match decision {
-            Some(true) if !self.busy => {
+            Some(true) => {
+                // `spawn()` avvia subito il job se la slot è libera, altrimenti
+                // lo accoda: la conferma data durante un'operazione non va persa.
                 if let Some((_, job)) = self.confirm.take() {
                     self.spawn(ctx, job);
                 }
             }
-            Some(true) => {
-                // Non consumare la conferma: il job verrebbe scartato da
-                // `spawn()` e l'azione resterebbe ineseguita senza feedback.
-                self.log.push_str(t("Operazione in corso..."));
+            Some(false) => {
+                // Feedback esplicito: annullare una conferma non applica alcuna modifica.
+                self.log.push_str(t("Operazione annullata: nessuna modifica è stata applicata."));
                 self.log.push('\n');
+                if self.page == Page::RestoreHistory {
+                    self.restore_history_msg = Some((
+                        t("Operazione annullata: nessuna modifica è stata applicata.").to_string(),
+                        false,
+                    ));
+                }
+                self.confirm = None;
             }
-            Some(false) => self.confirm = None,
             None => {}
         }
 
@@ -3683,7 +3995,7 @@ impl eframe::App for App {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui
-                            .add(egui::Button::new(egui::RichText::new(t("Chiudi")).strong().color(egui::Color32::WHITE)).fill(ui::BAD))
+                            .add(egui::Button::new(egui::RichText::new(t("Chiudi")).strong().color(ui::on_fill_text(ui::BAD))).fill(ui::BAD))
                             .clicked()
                         {
                             close = true;
@@ -3752,6 +4064,7 @@ impl eframe::App for App {
                     Page::About => self.ui_about(ui, ctx),
                     Page::Duplicates => self.ui_duplicates(ui, ctx),
                     Page::Quarantine => self.ui_quarantine(ui, ctx),
+                    Page::RestoreHistory => self.ui_restore_history(ui, ctx),
                     Page::Services => self.ui_services(ui, ctx),
                     Page::Updates => self.ui_updates(ui, ctx),
                     Page::Snaps => self.ui_snaps(ui, ctx),
@@ -3856,6 +4169,23 @@ mod cli {
         exclude: Vec<String>,
     }
 
+    impl Args {
+        fn mode(&self) -> &'static str {
+            if self.dry_run {
+                "dry-run"
+            } else if self.clean {
+                "clean"
+            } else {
+                "scan"
+            }
+        }
+    }
+
+    /// Solo `clean` può scrivere: `scan` e `dry-run` restano in sola lettura.
+    fn needs_write(mode: &str) -> bool {
+        mode == "clean"
+    }
+
     /// Categorie effettivamente selezionate per la pulizia headless.
     #[derive(Clone, Debug)]
     struct Selection {
@@ -3917,69 +4247,17 @@ mod cli {
             std::process::exit(EXIT_OK);
         }
 
-        let mut args = Args::default();
-        let mut i = 0;
-        while i < raw.len() {
-            let arg = raw[i].as_str();
-            match arg {
-                "--scan" => args.scan = true,
-                "--clean" => args.clean = true,
-                "--dry-run" => args.dry_run = true,
-                "--json" => args.json = true,
-                "--yes" => args.yes = true,
-                "--include" | "--exclude" => {
-                    i += 1;
-                    let value = raw.get(i).cloned().unwrap_or_default();
-                    let ids = parse_ids(&value);
-                    if arg == "--include" {
-                        args.include_set = true;
-                        args.include = ids;
-                    } else {
-                        args.exclude.extend(ids);
-                    }
-                }
-                other if other.starts_with("--include=") => {
-                    args.include_set = true;
-                    args.include = parse_ids(&other["--include=".len()..]);
-                }
-                other if other.starts_with("--exclude=") => {
-                    args.exclude
-                        .extend(parse_ids(&other["--exclude=".len()..]));
-                }
-                other => usage_error(tf("Argomento non valido: {}", &[&other as &dyn std::fmt::Display])),
-            }
-            i += 1;
-        }
-
+        let args = match parse(&raw) {
+            Ok(args) => args,
+            Err(msg) => usage_error(msg),
+        };
         let selection = build_selection(&args);
-
-        if !args.scan && !args.clean && !args.dry_run {
-            usage_error(t("Nessun comando specificato: usa --scan, --clean o --dry-run (oppure avvia DebUtility senza argomenti per la GUI).").to_string());
-        }
-        if args.scan && (args.clean || args.dry_run) {
-            usage_error(t("--scan non può essere combinato con --clean o --dry-run.").to_string());
-        }
-        if args.json && !(args.scan || args.clean || args.dry_run) {
-            usage_error(t("--json richiede --scan, --clean o --dry-run.").to_string());
-        }
-        if args.yes && !(args.clean || args.dry_run) {
-            usage_error(t("--yes richiede --clean o --dry-run.").to_string());
-        }
-        if args.clean && !args.dry_run && !args.yes {
-            eprintln!("{}", t("--clean richiede --yes: nessun file è stato rimosso."));
-            eprintln!("{}", help_text());
-            std::process::exit(EXIT_USAGE);
-        }
-
-        if selection.ids.is_empty() {
-            usage_error(t("Nessuna categoria valida selezionata.").to_string());
-        }
-
-        let mode = if args.dry_run { "dry-run" } else if args.clean { "clean" } else { "scan" };
+        let mode = args.mode();
         let mut report = collect(mode != "scan", &selection);
-        let ok = match mode {
-            "scan" | "dry-run" => true,
-            _ => execute_clean(&mut report, &selection),
+        let ok = if needs_write(mode) {
+            execute_clean(&mut report, &selection)
+        } else {
+            true
         };
         print_report(mode, &report, args.json, ok, &selection);
         if args.json && mode == "clean" {
@@ -3999,7 +4277,69 @@ mod cli {
         std::process::exit(if ok { EXIT_OK } else { EXIT_ERROR });
     }
 
-    fn parse_ids(value: &str) -> Vec<String> {
+    /// Interpreta e valida gli argomenti senza effetti collaterali: `handle`
+    /// si limita a stampare l'eventuale errore e a uscire. I test possono così
+    /// verificare i flag (soprattutto `--dry-run`) senza avviare pulizie.
+    fn parse(raw: &[String]) -> Result<Args, String> {
+        let mut args = Args::default();
+        let mut i = 0;
+        while i < raw.len() {
+            let arg = raw[i].as_str();
+            match arg {
+                "--scan" => args.scan = true,
+                "--clean" => args.clean = true,
+                "--dry-run" => args.dry_run = true,
+                "--json" => args.json = true,
+                "--yes" => args.yes = true,
+                "--include" | "--exclude" => {
+                    i += 1;
+                    let value = raw.get(i).cloned().unwrap_or_default();
+                    let ids = parse_ids(&value)?;
+                    if arg == "--include" {
+                        args.include_set = true;
+                        args.include = ids;
+                    } else {
+                        args.exclude.extend(ids);
+                    }
+                }
+                other if other.starts_with("--include=") => {
+                    args.include_set = true;
+                    args.include = parse_ids(&other["--include=".len()..])?;
+                }
+                other if other.starts_with("--exclude=") => {
+                    args.exclude
+                        .extend(parse_ids(&other["--exclude=".len()..])?);
+                }
+                other => {
+                    return Err(tf("Argomento non valido: {}", &[&other as &dyn std::fmt::Display]));
+                }
+            }
+            i += 1;
+        }
+
+        if !args.scan && !args.clean && !args.dry_run {
+            return Err(t("Nessun comando specificato: usa --scan, --clean o --dry-run (oppure avvia DebUtility senza argomenti per la GUI).").to_string());
+        }
+        if args.scan && (args.clean || args.dry_run) {
+            return Err(t("--scan non può essere combinato con --clean o --dry-run.").to_string());
+        }
+        if args.json && !(args.scan || args.clean || args.dry_run) {
+            return Err(t("--json richiede --scan, --clean o --dry-run.").to_string());
+        }
+        if args.yes && !(args.clean || args.dry_run) {
+            return Err(t("--yes richiede --clean o --dry-run.").to_string());
+        }
+        if args.clean && !args.dry_run && !args.yes {
+            return Err(t("--clean richiede --yes: nessun file è stato rimosso.").to_string());
+        }
+
+        if build_selection(&args).ids.is_empty() {
+            return Err(t("Nessuna categoria valida selezionata.").to_string());
+        }
+        Ok(args)
+    }
+
+    fn parse_ids(value: &str) -> Result<Vec<String>, String> {
         let mut out = Vec::new();
         for raw in value.split(',') {
             let id = raw.trim();
@@ -4010,13 +4350,13 @@ mod cli {
                 .iter()
                 .any(|(known, _, _)| *known == id)
             {
-                usage_error(tf("Categoria non valida in --include/--exclude: {}", &[&id]));
+                return Err(tf("Categoria non valida in --include/--exclude: {}", &[&id]));
             }
             if !out.iter().any(|v| v == id) {
                 out.push(id.to_string());
             }
         }
-        out
+        Ok(out)
     }
 
     fn build_selection(args: &Args) -> Selection {
@@ -4397,6 +4737,257 @@ mod cli {
         out.push_str("}\n");
         out
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn parse_args(raw: &[&str]) -> Result<Args, String> {
+            parse(&raw.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        }
+
+        #[test]
+        fn dry_run_e_in_sola_lettura() {
+            let dry = parse_args(&["--dry-run"]).expect("--dry-run valido");
+            assert_eq!(dry.mode(), "dry-run");
+            assert!(!dry.clean, "dry-run non deve attivare la pulizia");
+            assert!(!needs_write(dry.mode()), "dry-run non scrive nulla");
+
+            let dry_json = parse_args(&["--dry-run", "--json"]).expect("dry-run + json");
+            assert_eq!(dry_json.mode(), "dry-run");
+            assert!(dry_json.json);
+            assert!(!needs_write(dry_json.mode()));
+
+            let dry_yes = parse_args(&["--dry-run", "--yes"]).expect("dry-run + yes");
+            assert_eq!(dry_yes.mode(), "dry-run");
+            assert!(!needs_write(dry_yes.mode()));
+
+            let scan = parse_args(&["--scan"]).expect("--scan valido");
+            assert_eq!(scan.mode(), "scan");
+            assert!(!needs_write(scan.mode()));
+
+            let clean = parse_args(&["--clean", "--yes"]).expect("--clean --yes valido");
+            assert_eq!(clean.mode(), "clean");
+            assert!(needs_write(clean.mode()), "solo clean può rimuovere file");
+        }
+
+        #[test]
+        fn combinazioni_non_valide_vengono_rifiutate() {
+            assert!(parse_args(&["--clean"]).is_err(), "--clean richiede --yes");
+            assert!(parse_args(&["--scan", "--dry-run"]).is_err());
+            assert!(parse_args(&["--json"]).is_err());
+            assert!(parse_args(&["--yes"]).is_err());
+            assert!(parse_args(&["--sconosciuto"]).is_err());
+            assert!(parse_args(&["--dry-run", "--include=categoria_inesistente"]).is_err());
+            assert!(
+                parse_args(&["--dry-run", "--include=temp", "--exclude=temp"]).is_err(),
+                "selezione vuota"
+            );
+        }
+
+        #[test]
+        fn output_json_e_valido_con_caratteri_speciali() {
+            assert_eq!(jstr("a\"b\\c\nd\te\r\u{1}"), "\"a\\\"b\\\\c\\nd\\te\\r\\u0001\"");
+
+            let report = Report {
+                entries: vec![Entry {
+                    id: "temp",
+                    label: "cartella \"speciale\"\ncon tab\t\\".to_string(),
+                    bytes: Some(2048),
+                    count: None,
+                    paths: vec!["/tmp/a\tb".into(), "/tmp/quote\"".into()],
+                }],
+                logs: vec!["log\nriga".into()],
+                warnings: vec!["attenzione".into()],
+                freed_bytes: None,
+            };
+            let selection = Selection { ids: vec!["temp".into(), "user_cache".into()] };
+            let json = report_json("dry-run", &report, true, &selection);
+
+            assert!(json.starts_with("{\n"));
+            assert!(json.ends_with("}\n"));
+            assert!(json.contains("\"mode\": \"dry-run\""));
+            assert!(json.contains("\"status\": \"ok\""));
+            assert!(json.contains("\"exit_code\": 0"));
+            assert!(json.contains("\"freed_bytes\": null"));
+            assert!(json.contains("\"id\": \"temp\""));
+            JsonParser::new(&json).parse().expect("report_json deve produrre JSON valido");
+        }
+
+        /// Validatore JSON minimale e senza dipendenze: verifica l'intero output
+        /// di `--json` (struttura, stringhe escape, numeri, valori null).
+        struct JsonParser<'a> {
+            s: &'a [u8],
+            i: usize,
+        }
+
+        impl<'a> JsonParser<'a> {
+            fn new(s: &'a str) -> Self {
+                Self { s: s.as_bytes(), i: 0 }
+            }
+
+            fn peek(&self) -> Option<u8> {
+                self.s.get(self.i).copied()
+            }
+
+            fn ws(&mut self) {
+                while self.peek().is_some_and(|b| matches!(b, b' ' | b'\n' | b'\r' | b'\t')) {
+                    self.i += 1;
+                }
+            }
+
+            fn parse(&mut self) -> Result<(), String> {
+                self.value()?;
+                self.ws();
+                if self.i != self.s.len() {
+                    return Err(format!("dati extra in posizione {}", self.i));
+                }
+                Ok(())
+            }
+
+            fn value(&mut self) -> Result<(), String> {
+                self.ws();
+                match self.peek().ok_or("fine inaspettata")? {
+                    b'{' => self.object(),
+                    b'[' => self.array(),
+                    b'"' => self.string(),
+                    b't' => self.literal("true"),
+                    b'f' => self.literal("false"),
+                    b'n' => self.literal("null"),
+                    b'-' | b'0'..=b'9' => self.number(),
+                    b => Err(format!("valore non valido {:?} in posizione {}", b as char, self.i)),
+                }
+            }
+
+            fn object(&mut self) -> Result<(), String> {
+                self.i += 1;
+                self.ws();
+                if self.peek() == Some(b'}') {
+                    self.i += 1;
+                    return Ok(());
+                }
+                loop {
+                    self.ws();
+                    self.string()?;
+                    self.ws();
+                    if self.peek() != Some(b':') {
+                        return Err("':' mancante in oggetto".into());
+                    }
+                    self.i += 1;
+                    self.value()?;
+                    self.ws();
+                    match self.peek() {
+                        Some(b',') => self.i += 1,
+                        Some(b'}') => {
+                            self.i += 1;
+                            return Ok(());
+                        }
+                        _ => return Err("oggetto non chiuso".into()),
+                    }
+                }
+            }
+
+            fn array(&mut self) -> Result<(), String> {
+                self.i += 1;
+                self.ws();
+                if self.peek() == Some(b']') {
+                    self.i += 1;
+                    return Ok(());
+                }
+                loop {
+                    self.value()?;
+                    self.ws();
+                    match self.peek() {
+                        Some(b',') => self.i += 1,
+                        Some(b']') => {
+                            self.i += 1;
+                            return Ok(());
+                        }
+                        _ => return Err("array non chiuso".into()),
+                    }
+                }
+            }
+
+            fn string(&mut self) -> Result<(), String> {
+                if self.peek() != Some(b'"') {
+                    return Err(format!("stringa attesa in posizione {}", self.i));
+                }
+                self.i += 1;
+                while let Some(b) = self.peek() {
+                    match b {
+                        b'"' => {
+                            self.i += 1;
+                            return Ok(());
+                        }
+                        b'\\' => {
+                            self.i += 1;
+                            match self.peek() {
+                                Some(c) if matches!(c, b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => {
+                                    self.i += 1;
+                                }
+                                Some(b'u') => {
+                                    self.i += 1;
+                                    for _ in 0..4 {
+                                        if !self.peek().is_some_and(|c| c.is_ascii_hexdigit()) {
+                                            return Err("\\u con cifre errate".into());
+                                        }
+                                        self.i += 1;
+                                    }
+                                }
+                                _ => return Err("escape non valido".into()),
+                            }
+                        }
+                        c if c < 0x20 => return Err("controllo non escapato".into()),
+                        _ => self.i += 1,
+                    }
+                }
+                Err("stringa non chiusa".into())
+            }
+
+            fn literal(&mut self, word: &str) -> Result<(), String> {
+                if self.s[self.i..].starts_with(word.as_bytes()) {
+                    self.i += word.len();
+                    Ok(())
+                } else {
+                    Err(format!("letterale {word} atteso in posizione {}", self.i))
+                }
+            }
+
+            fn number(&mut self) -> Result<(), String> {
+                if self.peek() == Some(b'-') {
+                    self.i += 1;
+                }
+                let digits = self.digits();
+                if digits == 0 {
+                    return Err("numero senza cifre".into());
+                }
+                if self.peek() == Some(b'.') {
+                    self.i += 1;
+                    if self.digits() == 0 {
+                        return Err("parte frazionaria vuota".into());
+                    }
+                }
+                if self.peek().is_some_and(|c| matches!(c, b'e' | b'E')) {
+                    self.i += 1;
+                    if self.peek().is_some_and(|c| matches!(c, b'+' | b'-')) {
+                        self.i += 1;
+                    }
+                    if self.digits() == 0 {
+                        return Err("esponente vuoto".into());
+                    }
+                }
+                Ok(())
+            }
+
+            fn digits(&mut self) -> usize {
+                let start = self.i;
+                while self.peek().is_some_and(|b| b.is_ascii_digit()) {
+                    self.i += 1;
+                }
+                self.i - start
+            }
+        }
+    }
 }
 
 /// Rileva, tramite `glxinfo -B`, se il sistema richiede il rendering software.
@@ -4511,7 +5102,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1360.0, 820.0])
-            .with_min_inner_size([1120.0, 700.0]),
+            .with_min_inner_size([800.0, 560.0]),
         ..Default::default()
     };
     eframe::run_native("DebUtility", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))

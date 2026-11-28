@@ -164,16 +164,16 @@ impl App {
         let confirm_text = t("Aggiornare ora? L'operazione può richiedere diversi minuti: non spegnere il computer e non chiudere DebUtility finché non finisce.");
         let refresh = !self.upd_checked;
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Cerca aggiornamenti"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Cerca aggiornamenti"))).clicked() {
                 self.spawn(ctx, check_job());
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Aggiorna APT"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna APT"))).clicked() {
                 self.confirm = Some((confirm_text.to_string(), upd_job(true, false, refresh)));
             }
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Aggiorna Flatpak"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Aggiorna Flatpak"))).clicked() {
                 self.spawn(ctx, upd_job(false, true, false));
             }
-            if ui::primary_button(ui, t("Aggiorna tutto"), !self.busy).clicked() {
+            if ui::primary_button(ui, t("Aggiorna tutto"), self.action_enabled()).clicked() {
                 self.confirm = Some((confirm_text.to_string(), upd_job(true, true, refresh)));
             }
             if self.busy {

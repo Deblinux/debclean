@@ -39,7 +39,7 @@ pub fn audit_permissions() -> Vec<InsecureFile> {
                     path: ssh_dir.clone(),
                     current_mode: mode,
                     recommended_mode: 0o700,
-                    reason: "Cartella .ssh deve essere accessibile solo dall'utente (700)",
+                    reason: t("Cartella .ssh deve essere accessibile solo dall'utente (700)"),
                 });
             }
         }
@@ -58,7 +58,7 @@ pub fn audit_permissions() -> Vec<InsecureFile> {
                                 path: p,
                                 current_mode: mode,
                                 recommended_mode: 0o644,
-                                reason: "Chiave pubblica non deve essere scrivibile da altri (644)",
+                                reason: t("Chiave pubblica non deve essere scrivibile da altri (644)"),
                             });
                         }
                     } else if (file_name.starts_with("id_") || file_name == "authorized_keys" || file_name == "config") && mode != 0o600 {
@@ -66,7 +66,7 @@ pub fn audit_permissions() -> Vec<InsecureFile> {
                             path: p,
                             current_mode: mode,
                             recommended_mode: 0o600,
-                            reason: "Chiave privata o configurazione SSH deve essere 600",
+                            reason: t("Chiave privata o configurazione SSH deve essere 600"),
                         });
                     }
                 }
@@ -88,7 +88,7 @@ pub fn audit_permissions() -> Vec<InsecureFile> {
                         path: p,
                         current_mode: mode,
                         recommended_mode: if md.is_dir() { 0o755 } else { 0o644 },
-                        reason: "File con permessi globali di scrittura a chiunque (777/666)",
+                        reason: t("File con permessi globali di scrittura a chiunque (777/666)"),
                     });
                 }
             }
@@ -118,15 +118,15 @@ impl App {
     // ---------------- AUDIT PERMESSI ----------------
     pub(crate) fn ui_audit_perms(&mut self, ui: &mut egui::Ui) {
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Audit permessi e file esposti")).strong().size(20.0));
+            ui::section(ui, "🛡", "Audit permessi e file esposti", "");
             ui.label(t("Analizza file e cartelle sensibili (come ~/.ssh) per verificare che non siano leggibili o modificabili da altri utenti del sistema."));
         });
         ui.add_space(3.0);
 
         let issues = audit_permissions();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(format!("{}: {}", t("Problemi rilevati"), issues.len()));
-            if !issues.is_empty() && ui::primary_button(ui, t("Correggi tutti i permessi"), !self.busy).clicked() {
+            if !issues.is_empty() && ui::primary_button(ui, t("Correggi tutti i permessi"), self.action_enabled()).clicked() {
                 let mut fixed = 0;
                 let mut failed = 0;
                 for i in &issues {
@@ -157,7 +157,7 @@ impl App {
         } else {
             for item in issues {
                 ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new(format!("{:04o} ➔ {:04o}", item.current_mode, item.recommended_mode)).strong().color(ui::semantic_text(ui::WARN)));
                         ui.label(item.path.display().to_string());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -186,7 +186,7 @@ impl App {
     // ---------------- GESTIONE CHIAVI SSH ----------------
     pub(crate) fn ui_ssh_keys(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Gestione chiavi SSH")).strong().size(20.0));
+            ui::section(ui, "🔑", "Gestione chiavi SSH", "");
             ui.label(t("Visualizza le tue chiavi pubbliche da copiare su server remoti o GitHub, oppure crea una nuova coppia ed25519."));
         });
         ui.add_space(3.0);
@@ -209,8 +209,8 @@ impl App {
             }
         }
 
-        ui.horizontal(|ui| {
-            if ui::primary_button(ui, t("➕ Genera nuova chiave ED25519"), !self.busy).clicked() {
+        ui.horizontal_wrapped(|ui| {
+            if ui::primary_button(ui, t("➕ Genera nuova chiave ED25519"), self.action_enabled()).clicked() {
                 let user = util::username();
                 let host = sysinfo::System::host_name().unwrap_or_else(|| "linux".into());
                 let comment = format!("{user}@{host}");
@@ -222,20 +222,21 @@ impl App {
             }
             let (_, agent_out) = util::run_shell("ssh-add -l 2>/dev/null", false);
             let agent_active = !agent_out.contains("Could not open a connection") && !agent_out.trim().is_empty();
-            ui::led(ui, Some(agent_active), if agent_active { "SSH-Agent attivo" } else { "SSH-Agent non attivo o vuoto" });
+            let agent_label = if agent_active { t("SSH-Agent attivo") } else { t("SSH-Agent non attivo o vuoto") };
+            ui::led(ui, Some(agent_active), agent_label);
         });
         ui.add_space(3.0);
 
         for (name, pub_content) in keys {
             ui::card(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(&name).strong().size(18.0));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new(&name).strong().size(18.0).color(ui::text_primary()));
                     if ui.button(t("📋 Copia chiave pubblica")).clicked() {
                         ctx.copy_text(pub_content.clone());
                         self.log.push_str(&format!("✔ Chiave {name} copiata negli appunti!\n"));
                     }
                 });
-                ui.add(egui::TextEdit::multiline(&mut pub_content.as_str()).desired_rows(2).desired_width(f32::INFINITY));
+                ui.add(egui::TextEdit::multiline(&mut pub_content.as_str()).desired_rows(2).desired_width(ui::fit_width(ui, 420.0, 160.0)));
             });
             ui.add_space(3.0);
         }
@@ -245,7 +246,7 @@ impl App {
     // ---------------- SCANNER ROOTKIT / MALWARE ----------------
     pub(crate) fn ui_rootkit(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::card(ui, |ui| {
-            ui.label(egui::RichText::new(t("Scanner Rootkit e Malware")).strong().size(20.0));
+            ui::section(ui, "🔍", "Scanner Rootkit e Malware", "");
             ui.label(t("Esegue una scansione del sistema alla ricerca di rootkit, trojan e file modificati illegalmente usando chkrootkit o rkhunter."));
         });
         ui.add_space(3.0);
@@ -256,7 +257,7 @@ impl App {
         if !have_chk && !have_rkh {
             ui::card(ui, |ui| {
                 ui.colored_label(ui::semantic_text(ui::WARN), t("Né chkrootkit né rkhunter sono installati nel sistema."));
-                if ui::primary_button(ui, t("Installa chkrootkit e rkhunter"), !self.busy).clicked() {
+                if ui::primary_button(ui, t("Installa chkrootkit e rkhunter"), self.action_enabled()).clicked() {
                     self.spawn(ctx, crate::cmd_job("rootkit", "apt-get update && apt-get install -y chkrootkit rkhunter".into(), true));
                 }
             });

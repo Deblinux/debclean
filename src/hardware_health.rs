@@ -244,44 +244,33 @@ impl App {
         ui::title(ui, "Guardiano Predittivo");
 
         ui::card(ui, |ui| {
+            ui::section(ui, "🛡", "Guardiano Predittivo", "Stato di salute di batteria e archiviazione");
             ui.label(
                 egui::RichText::new(t(
                     "Analisi predittiva dello stato di salute di SSD/NVMe e batteria: calcola l'usura reale delle celle, i cicli di carica e i Terabyte scritti per prevenire guasti hardware.",
                 ))
-                .size(16.0),
+                .size(15.0)
+                .color(ui::text_dim()),
             );
         });
 
         ui.add_space(4.0);
 
-        // --- SEZIONE 1: SALUTE BATTERIA ---
-        ui.label(
-            egui::RichText::new(t("STATO DI DEGRADO BATTERIA"))
-                .size(15.0)
-                .strong()
-                .color(ui::text_dim()),
-        );
-        ui.add_space(2.0);
-
-        let batteries = scan_batteries();
-        if batteries.is_empty() {
-            ui::card(ui, |ui| {
+        ui::card(ui, |ui| {
+            ui::section(ui, "🔋", "STATO DI DEGRADO BATTERIA", "Capacità, cicli e salute stimata");
+            let batteries = scan_batteries();
+            if batteries.is_empty() {
                 ui.label(t("Nessuna batteria rilevata (sistema desktop o sensore non disponibile)."));
-            });
-        } else {
-            for bat in batteries {
-                ui::card(ui, |ui| {
-                   ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("🔋 {}", bat.name))
-                                .strong()
-                                .size(18.0),
-                        );
-                        ui.label(format!("({})", bat.status)); // Corretto: stampa direttamente lo stato
+            } else {
+                for (idx, bat) in batteries.into_iter().enumerate() {
+                    if idx > 0 {
+                        ui.add_space(6.0);
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(format!("🔋 {}", bat.name)).strong().size(17.0));
+                        ui.label(egui::RichText::new(format!("({})", bat.status)).color(ui::text_dim()));
                     });
-
                     ui.add_space(3.0);
-
                     let health_color = if bat.health_percent >= 85.0 {
                         egui::Color32::from_rgb(70, 200, 110)
                     } else if bat.health_percent >= 70.0 {
@@ -289,74 +278,50 @@ impl App {
                     } else {
                         egui::Color32::from_rgb(230, 70, 70)
                     };
-
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(t("Salute reale:"));
-                        ui.label(
-                            egui::RichText::new(format!("{:.1}%", bat.health_percent))
-                                .strong()
-                                .size(17.0)
-                                .color(health_color),
-                        );
+                        ui.label(egui::RichText::new(format!("{:.1}%", bat.health_percent)).strong().size(16.0).color(health_color));
                     });
-
-                    // Barra di avanzamento visuale della capacità residua
-                    let progress = bat.health_percent / 100.0;
-                    ui.add(
-                        egui::ProgressBar::new(progress)
-                            .fill(health_color)
-                            .text(format!(
-                                "{:.1} Wh / {:.1} Wh ({})",
-                                bat.full_charge_capacity_wh,
-                                bat.design_capacity_wh,
-                                t("Capacità attuale vs Originale")
-                            )),
+                    let progress = (bat.health_percent / 100.0).clamp(0.0, 1.0);
+                    let pct_txt = format!(
+                        "{:.1} Wh / {:.1} Wh ({})",
+                        bat.full_charge_capacity_wh,
+                        bat.design_capacity_wh,
+                        t("Capacità attuale vs Originale")
                     );
-
+                    let text_color = ui::progress_text_color(health_color);
+                    ui.scope(|ui| {
+                        ui.visuals_mut().override_text_color = Some(text_color);
+                        ui.visuals_mut().selection.stroke.color = text_color;
+                        ui.add(egui::ProgressBar::new(progress).fill(health_color).text(pct_txt));
+                    });
                     ui.add_space(2.0);
                     if let Some(cycles) = bat.cycle_count {
                         ui.label(format!("{}: {}", t("Cicli di carica completati"), cycles));
                     }
-                    ui.label(
-                        egui::RichText::new(&bat.estimated_remaining_life)
-                            .italics()
-                            .color(health_color),
-                    );
-                });
-                ui.add_space(3.0);
+                    ui.label(egui::RichText::new(&bat.estimated_remaining_life).italics().color(health_color));
+                }
             }
-        }
+        });
 
-        ui.add_space(5.0);
+        ui.add_space(4.0);
 
-        // --- SEZIONE 2: USURA DISCHI SSD / NVME ---
-        ui.label(
-            egui::RichText::new(t("ANALISI PREDITTIVA SSD E NVME"))
-                .size(15.0)
-                .strong()
-                .color(ui::text_dim()),
-        );
-        ui.add_space(2.0);
-
-        let disks = scan_storage();
-        if disks.is_empty() {
-            ui::card(ui, |ui| {
+        ui::card(ui, |ui| {
+            ui::section(ui, "💾", "ANALISI PREDITTIVA SSD E NVME", "Usura, dati scritti e temperatura");
+            let disks = scan_storage();
+            if disks.is_empty() {
                 ui.label(t("Nessun disco SSD o NVMe rilevato."));
-            });
-        } else {
-            for disk in disks {
-                ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+            } else {
+                for (idx, disk) in disks.into_iter().enumerate() {
+                    if idx > 0 {
+                        ui.add_space(6.0);
+                    }
+                    ui.horizontal_wrapped(|ui| {
                         let tag = if disk.is_nvme { "NVMe" } else if disk.is_rotational { "HDD" } else { "SSD" };
-                        ui.label(
-                            egui::RichText::new(format!("💾 {} ({})", disk.model, disk.device))
-                                .strong()
-                                .size(18.0),
-                        );
+                        ui.label(egui::RichText::new(format!("💾 {} ({})", disk.model, disk.device)).strong().size(17.0));
                         ui.label(egui::RichText::new(format!("[{}]", tag)).color(ui::text_dim()));
                     });
                     ui.add_space(3.0);
-
                     if let Some(wear) = disk.wear_level_percent {
                         let remaining_health = 100u8.saturating_sub(wear);
                         let color = if remaining_health >= 30 {
@@ -366,38 +331,36 @@ impl App {
                         } else {
                             egui::Color32::from_rgb(230, 70, 70)
                         };
-
-                        ui.add(
-                            egui::ProgressBar::new(remaining_health as f32 / 100.0)
-                                .fill(color)
-                                .text(format!(
-                                    "{}: {}% ({}: {}%)",
-                                    t("Vita utile residua stimata"),
-                                    remaining_health,
-                                    t("Usura"),
-                                    wear
-                                )),
+                        let txt = format!(
+                            "{}: {}% ({}: {}%)",
+                            t("Vita utile residua stimata"),
+                            remaining_health,
+                            t("Usura"),
+                            wear
                         );
+                        let text_color = ui::progress_text_color(color);
+                        ui.scope(|ui| {
+                            ui.visuals_mut().override_text_color = Some(text_color);
+                            ui.visuals_mut().selection.stroke.color = text_color;
+                            ui.add(egui::ProgressBar::new(remaining_health as f32 / 100.0).fill(color).text(txt));
+                        });
                     }
-
                     ui.add_space(2.0);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if let Some(hours) = disk.power_on_hours {
-                            ui.label(format!("{}: {} h  |", t("Ore di attività"), hours));
+                            ui.label(format!("{}: {} h", t("Ore di attività"), hours));
                         }
                         if let Some(tbw) = disk.data_written_tb {
-                            ui.label(format!("{}: {:.2} TB  |", t("Dati scritti (TBW)"), tbw));
+                            ui.label(format!("• {}: {:.2} TB", t("Dati scritti (TBW)"), tbw));
                         }
                         if let Some(temp) = disk.temp_celsius {
-                            ui.label(format!("{}: {} °C", t("Temperatura"), temp));
+                            ui.label(format!("• {}: {} °C", t("Temperatura"), temp));
                         }
                     });
-
                     ui.add_space(2.0);
                     ui.label(egui::RichText::new(&disk.status_summary).italics());
-                });
-                ui.add_space(3.0);
+                }
             }
-        }
+        });
     }
 }

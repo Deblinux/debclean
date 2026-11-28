@@ -1,7 +1,7 @@
 use crate::i18n::{t, tf, tr};
 use crate::pages_clean::POWER_SAVE_ORIG;
 use crate::update_check;
-use crate::{clean_and_scan_job, cleaner, cmd_job, health, ui, util, App, Job, Msg, Page};
+use crate::{clean_and_scan_job, cleaner, cmd_job, health, ui, util, App, AppSortKey, Job, Msg, Page, ProcSortKey};
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use std::net::{SocketAddr, TcpStream};
@@ -157,14 +157,14 @@ fn cpu_stress(secs: u64) -> String {
         })
         .collect();
     let total: u64 = handles.into_iter().map(|h| h.join().unwrap_or(0)).sum();
-    format!("Stress CPU completato: {n} thread per {secs} s ({total} cicli). Nessun blocco o errore rilevato.")
+    tf("Stress CPU completato: {} thread per {} s ({} cicli). Nessun blocco o errore rilevato.", &[&n, &secs, &total])
 }
 
 fn ram_test(mb: usize) -> String {
     let words = mb.saturating_mul(1024 * 1024) / 8;
     let mut v: Vec<u64> = Vec::new();
     if v.try_reserve_exact(words).is_err() {
-        return format!("Memoria insufficiente per allocare {mb} MB.");
+        return tf("Memoria insufficiente per allocare {} MB.", &[&mb]);
     }
     v.resize(words, 0);
     let mut errors = 0u64;
@@ -189,9 +189,9 @@ fn ram_test(mb: usize) -> String {
         }
     }
     if errors == 0 {
-        format!("Test RAM su {mb} MB superato: 0 errori (4 pattern + test indirizzi).")
+        tf("Test RAM su {} MB superato: 0 errori (4 pattern + test indirizzi).", &[&mb])
     } else {
-        format!("ATTENZIONE: {errors} errori rilevati durante il test RAM su {mb} MB!")
+        tf("ATTENZIONE: {} errori rilevati durante il test RAM su {} MB!", &[&errors, &mb])
     }
 }
 
@@ -340,10 +340,10 @@ impl App {
                     let sec_btn = egui::Button::new(
                         egui::RichText::new(t("Diagnosi completa")).strong().size(14.0),
                     );
-                    if ui.add_enabled(!self.busy, sec_btn).clicked() {
+                    if ui.add_enabled(self.action_enabled(), sec_btn).clicked() {
                         goto = Some(Page::Fixer);
                     }
-                    if ui::primary_button_compact(ui, t("Ottimizza ora"), !self.busy).clicked() {
+                    if ui::primary_button_compact(ui, t("Ottimizza ora"), self.action_enabled()).clicked() {
                         let kinds: Vec<cleaner::Kind> =
                             self.items.iter().filter(|i| i.selected).map(|i| i.kind).collect();
                         self.spawn(ctx, clean_and_scan_job("cleaner", kinds, true));
@@ -369,22 +369,26 @@ impl App {
             .map(|d| d.total.saturating_sub(d.free).max(1) as f32 / d.total.max(1) as f32)
             .unwrap_or(0.0);
         let kpis = [
-            ("✓", problems.to_string(), "Problemi", if problems > 0 { ui::semantic_text(ui::BAD) } else { ui::semantic_text(ui::GOOD) }),
-            ("▣", cleaner::fmt_bytes(recoverable), "Da recuperare", ui::accent_text()),
+            ("✓", problems.to_string(), t("Problemi"), if problems > 0 { ui::semantic_text(ui::BAD) } else { ui::semantic_text(ui::GOOD) }),
+            ("▣", cleaner::fmt_bytes(recoverable), t("Da recuperare"), ui::accent_text()),
             ("↻", updates, "Aggiornamenti", ui::semantic_text(ui::BLUE_LIGHT)),
             ("◉", format!("{:.0}%", disk_frac * 100.0), "Disco", ui::semantic_text(ui::level_color(disk_frac))),
         ];
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-            let total_w = 4.0 * 156.0 + 3.0 * 8.0;
-            let pad = ((ui.available_width() - total_w) * 0.5).max(0.0);
-            if pad > 0.0 {
-                ui.add_space(pad);
-            }
-            for (glyph, value, name, tint) in kpis {
-                ui::kpi_card_compact(ui, glyph, &value, name, tint);
-            }
-        });
+        // Tante card quante ne entrano: 4 su schermi larghi, 2 su quelli compatti.
+        let kpi_cols = ui::column_count(ui, 156.0, 8.0, 4);
+        for chunk in kpis.chunks(kpi_cols) {
+            let row_w = chunk.len() as f32 * 156.0 + chunk.len().saturating_sub(1) as f32 * 8.0;
+            let pad = ((ui.available_width() - row_w) * 0.5).max(0.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
+                if pad > 0.0 {
+                    ui.add_space(pad);
+                }
+                for (glyph, value, name, tint) in chunk {
+                    ui::kpi_card_compact(ui, glyph, value.as_str(), name, *tint);
+                }
+            });
+        }
 
         ui.add_space(3.0);
         ui::section_compact(ui, "▦", "Accessi rapidi", "Gli strumenti più usati, a portata di clic");
@@ -429,7 +433,7 @@ impl App {
                     format!("{} / {}", cleaner::fmt_bytes(used), cleaner::fmt_bytes(d.total)),
                 )
             }
-            None => (0.0, "n/d".to_string()),
+            None => (0.0, t("n/d").to_string()),
         };
         // Le ultime tre sezioni stanno affiancate: tutta la Dashboard resta dentro la finestra.
         ui.columns(3, |columns| {
@@ -439,13 +443,13 @@ impl App {
                 ui::card_tinted_compact(ui, ui::ACCENT, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 6.0);
                     let gauges = [
-                        ("CPU", cpu, format!("{} thread", i.cpu.threads)),
+                        ("CPU", cpu, tf("{} thread", &[&i.cpu.threads])),
                         ("RAM", ram, format!("{} / {}", cleaner::fmt_bytes(i.sys.used_memory()), cleaner::fmt_bytes(i.sys.total_memory()))),
                         ("Swap", swap, cleaner::fmt_bytes(i.sys.total_swap())),
-                        ("Disco /", dfrac, dsub),
+                        (t("Disco /"), dfrac, dsub),
                     ];
                     let row_w = 4.0 * 60.0 + 3.0 * 4.0;
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let avail = ui.available_width();
                         if avail > row_w {
                             ui.add_space((avail - row_w) * 0.5);
@@ -513,125 +517,164 @@ impl App {
 
     fn info_main(&self, ui: &mut egui::Ui) {
         let i = &self.info;
-        ui.heading(t("Sistema"));
-        egui::Grid::new("i_os").num_columns(2).striped(true).show(ui, |ui| {
-            for (k, v) in &i.os {
-                ui::kv(ui, k, v);
-            }
-            let up = sysinfo::System::uptime();
-            ui::kv(ui, "Uptime", &format!("{}g {}h {}m", up / 86400, up % 86400 / 3600, up % 3600 / 60));
-            for (k, v) in &i.hw {
-                if k == "Scheda madre" || k == "Modello" {
+        ui::card(ui, |ui| {
+            ui::section(ui, "ⓘ", "Sistema", "Informazioni principali sul sistema");
+            egui::Grid::new("i_os").num_columns(2).striped(true).spacing(egui::vec2(12.0, 6.0)).show(ui, |ui| {
+                for (k, v) in &i.os {
                     ui::kv(ui, k, v);
                 }
-            }
-            let temp = i
-                .temps
-                .iter()
-                .find(|(l, _)| {
-                    let l = l.to_lowercase();
-                    l.contains("core") || l.contains("cpu") || l.contains("tctl") || l.contains("package")
-                })
-                .or(i.temps.first());
-            if let Some((l, tv)) = temp {
-                ui::kv(ui, "Temperatura CPU", &format!("{tv:.0} °C ({l})"));
+                let up = sysinfo::System::uptime();
+                ui::kv(ui, "Uptime", &format!("{}g {}h {}m", up / 86400, up % 86400 / 3600, up % 3600 / 60));
+                for (k, v) in &i.hw {
+                    if k == "Scheda madre" || k == "Modello" {
+                        ui::kv(ui, k, v);
+                    }
+                }
+                let temp = i
+                    .temps
+                    .iter()
+                    .find(|(l, _)| {
+                        let l = l.to_lowercase();
+                        l.contains("core") || l.contains("cpu") || l.contains("tctl") || l.contains("package")
+                    })
+                    .or(i.temps.first());
+                if let Some((l, tv)) = temp {
+                    ui::kv(ui, "Temperatura CPU", &format!("{tv:.0} °C ({l})"));
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▤", "Memoria", "RAM, swap e memoria compressa");
+            let (tm, um) = (i.sys.total_memory(), i.sys.used_memory());
+            let (ts, us) = (i.sys.total_swap(), i.sys.used_swap());
+            ui.add(ui::bar(um as f32 / tm.max(1) as f32)
+                .text(format!("RAM: {} / {}", cleaner::fmt_bytes(um), cleaner::fmt_bytes(tm))));
+            ui.add_space(2.0);
+            ui.add(ui::bar(us as f32 / ts.max(1) as f32)
+                .text(tf("Swap: {} / {}", &[&cleaner::fmt_bytes(us), &cleaner::fmt_bytes(ts)])));
+            ui.add_space(4.0);
+            match zram_info() {
+                Some(z) => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui::led(ui, Some(true), &tf(
+                            "zRAM attiva: {} (algoritmo {}), dati {} → compressi {}",
+                            &[
+                                &cleaner::fmt_bytes(z.size),
+                                &z.algo,
+                                &cleaner::fmt_bytes(z.orig),
+                                &cleaner::fmt_bytes(z.compr),
+                            ],
+                        ));
+                    });
+                }
+                None => {
+                    ui::led(ui, Some(false), t("zRAM: non attiva"));
+                }
+            };
+        });
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "◔", "Dischi", "Spazio utilizzato sui volumi montati");
+            for d in &i.disks {
+                let used = d.total.saturating_sub(d.free);
+                let frac = used as f32 / d.total.max(1) as f32;
+                ui.add(ui::bar(frac).fill(ui::semantic_text(ui::level_color(frac))).text(format!(
+                    "{} ({}, {}) — {} / {}",
+                    d.mount,
+                    d.dev,
+                    d.fs,
+                    cleaner::fmt_bytes(used),
+                    cleaner::fmt_bytes(d.total)
+                )));
+                ui.add_space(2.0);
             }
         });
-        ui.add_space(3.0);
-        ui.heading(t("Memoria"));
-        let (tm, um) = (i.sys.total_memory(), i.sys.used_memory());
-        let (ts, us) = (i.sys.total_swap(), i.sys.used_swap());
-        ui.add(ui::bar(um as f32 / tm.max(1) as f32)
-            .text(format!("RAM: {} / {}", cleaner::fmt_bytes(um), cleaner::fmt_bytes(tm))));
-        ui.add(ui::bar(us as f32 / ts.max(1) as f32)
-            .text(format!("Swap: {} / {}", cleaner::fmt_bytes(us), cleaner::fmt_bytes(ts))));
-        match zram_info() {
-            Some(z) => ui.label(tf(
-                "zRAM attiva: {} (algoritmo {}), dati {} → compressi {}",
-                &[
-                    &cleaner::fmt_bytes(z.size),
-                    &z.algo,
-                    &cleaner::fmt_bytes(z.orig),
-                    &cleaner::fmt_bytes(z.compr),
-                ],
-            )),
-            None => ui.label(t("zRAM: non attiva")),
-        };
-        ui.add_space(3.0);
-        ui.heading(t("Dischi"));
-        for d in &i.disks {
-            let used = d.total.saturating_sub(d.free);
-            ui.add(ui::bar(used as f32 / d.total.max(1) as f32).text(format!(
-                "{} ({}, {}) — {} / {}",
-                d.mount,
-                d.dev,
-                d.fs,
-                cleaner::fmt_bytes(used),
-                cleaner::fmt_bytes(d.total)
-            )));
-        }
-        ui.add_space(3.0);
-        ui.heading(t("Rete"));
-        let online = match &self.net {
-            Some(n) if n.inet == Some(true) => "Online",
-            Some(_) => "Offline",
-            None => "n/d",
-        };
-        ui.label(format!("{}: {}", t("Stato"), tr(online)));
-        ui.label(egui::RichText::new(if i.net.is_empty() { t("Nessuna interfaccia con IP") } else { &i.net }).monospace());
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "◎", "Rete", "Stato di connessione e interfacce");
+            let online = match &self.net {
+                Some(n) if n.inet == Some(true) => Some(true),
+                Some(_) => Some(false),
+                None => None,
+            };
+            let online_label = match &self.net {
+                Some(n) if n.inet == Some(true) => "Online",
+                Some(_) => "Offline",
+                None => "n/d",
+            };
+            ui::led(ui, online, &format!("{}: {}", t("Stato"), tr(online_label)));
+            ui.add_space(4.0);
+            ui::output_box(ui, if i.net.is_empty() { t("Nessuna interfaccia con IP") } else { &i.net }, 90.0);
+        });
     }
 
     fn info_hw(&self, ui: &mut egui::Ui) {
         let i = &self.info;
-        ui.heading(t("Processore"));
-        egui::Grid::new("i_cpu").num_columns(2).striped(true).show(ui, |ui| {
-            ui::kv(ui, "Modello", &i.cpu.model);
-            ui::kv(ui, "Produttore", &i.cpu.vendor);
-            ui::kv(ui, "Dettagli", &i.cpu.details);
-            ui::kv(ui, "Architettura", &i.cpu.arch);
-            let phys = i.cpu.physical.map(|p| p.to_string()).unwrap_or_else(|| "n/d".into());
-            ui::kv(ui, "Core fisici", &phys);
-            ui::kv(ui, "Thread", &i.cpu.threads.to_string());
-            if !i.cpu.caches.is_empty() {
-                ui::kv(ui, "Cache", &i.cpu.caches.join(" · "));
-            }
-        });
-        ui.add_space(2.0);
-        for (n, c) in i.sys.cpus().iter().enumerate() {
-            ui.add(ui::bar((c.cpu_usage() / 100.0).clamp(0.0, 1.0))
-                .text(format!("Core {n}: {:.0}% — {} MHz", c.cpu_usage(), c.frequency())));
-        }
-        if !i.cpu.flags.is_empty() {
-            egui::CollapsingHeader::new(format!("Flag CPU ({})", i.cpu.flags.split_whitespace().count()))
-                .show(ui, |ui| {
-                    ui.label(&i.cpu.flags);
-                });
-        }
-        ui.add_space(3.0);
-        ui.heading(t("Memoria e dischi (modelli)"));
-        ui.label(format!("{}: {}", t("RAM totale"), cleaner::fmt_bytes(i.sys.total_memory())));
-        ui::output_box(ui, &i.lsblk, 140.0);
-        if !i.hw.is_empty() {
-            ui.add_space(3.0);
-            ui.heading(t("Scheda madre e BIOS"));
-            egui::Grid::new("i_hw").num_columns(2).striped(true).show(ui, |ui| {
-                for (k, v) in &i.hw {
-                    ui::kv(ui, k, v);
+        ui::card(ui, |ui| {
+            ui::section(ui, "◈", "Processore", "Modello, core e utilizzo in tempo reale");
+            egui::Grid::new("i_cpu").num_columns(2).striped(true).spacing(egui::vec2(12.0, 6.0)).show(ui, |ui| {
+                ui::kv(ui, "Modello", &i.cpu.model);
+                ui::kv(ui, "Produttore", &i.cpu.vendor);
+                ui::kv(ui, "Dettagli", &i.cpu.details);
+                ui::kv(ui, "Architettura", &i.cpu.arch);
+                let phys = i.cpu.physical.map(|p| p.to_string()).unwrap_or_else(|| "n/d".into());
+                ui::kv(ui, "Core fisici", &phys);
+                ui::kv(ui, "Thread", &i.cpu.threads.to_string());
+                if !i.cpu.caches.is_empty() {
+                    ui::kv(ui, "Cache", &i.cpu.caches.join(" · "));
                 }
             });
+            ui.add_space(4.0);
+            for (n, c) in i.sys.cpus().iter().enumerate() {
+                let frac = (c.cpu_usage() / 100.0).clamp(0.0, 1.0);
+                ui.add(ui::bar(frac).fill(ui::semantic_text(ui::level_color(frac)))
+                    .text(tf("Core {}: {}% — {} MHz", &[&n, &format!("{:.0}", c.cpu_usage()), &c.frequency()])));
+                ui.add_space(2.0);
+            }
+            if !i.cpu.flags.is_empty() {
+                egui::CollapsingHeader::new(tf("Flag CPU ({})", &[&i.cpu.flags.split_whitespace().count()]))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(&i.cpu.flags).size(14.0));
+                    });
+            }
+        });
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▤", "Memoria e dischi (modelli)", "Capacità RAM e dispositivi a blocchi");
+            ui.label(format!("{}: {}", t("RAM totale"), cleaner::fmt_bytes(i.sys.total_memory())));
+            ui.add_space(4.0);
+            ui::output_box(ui, &i.lsblk, 140.0);
+        });
+        if !i.hw.is_empty() {
+            ui.add_space(4.0);
+            ui::card(ui, |ui| {
+                ui::section(ui, "▣", "Scheda madre e BIOS", "Identificativi della piattaforma");
+                egui::Grid::new("i_hw").num_columns(2).striped(true).spacing(egui::vec2(12.0, 6.0)).show(ui, |ui| {
+                    for (k, v) in &i.hw {
+                        ui::kv(ui, k, v);
+                    }
+                });
+            });
         }
-        ui.add_space(3.0);
-        ui.heading(t("Scheda video"));
-        if i.gpu.is_empty() {
-            ui.label(t("Non rilevata (installa pciutils: sudo apt install pciutils)"));
-        }
-        for g in &i.gpu {
-            ui.label(g);
-        }
-        ui.add_space(3.0);
-        ui.heading(t("Rete"));
-        ui.label(egui::RichText::new(if i.net.is_empty() { t("Nessuna interfaccia con IP") } else { &i.net }).monospace());
-        ui.label(format!("Gateway: {}", if i.gateway.is_empty() { t("n/d") } else { &i.gateway }));
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▦", "Scheda video", "GPU rilevate dal sistema");
+            if i.gpu.is_empty() {
+                ui.label(t("Non rilevata (installa pciutils: sudo apt install pciutils)"));
+            }
+            for g in &i.gpu {
+                ui.label(egui::RichText::new(g).size(15.0));
+            }
+        });
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "◎", "Rete", "Interfacce e gateway predefinito");
+            ui::output_box(ui, if i.net.is_empty() { t("Nessuna interfaccia con IP") } else { &i.net }, 100.0);
+            ui.add_space(4.0);
+            let gateway = if i.gateway.is_empty() { t("n/d") } else { i.gateway.as_str() };
+            ui.label(egui::RichText::new(tf("Gateway: {}", &[&gateway])).strong());
+        });
     }
 
     pub(crate) fn ui_disk(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -639,171 +682,253 @@ impl App {
         ui::sub_tabs(ui, &mut self.sub, &["Analisi disco", "File grandi", "Spazio disco", "Stress test"]);
         match self.sub {
             0 => {
-                ui.label(t("Verifica lo stato di salute dei dischi (richiede smartmontools)."));
-                egui::CollapsingHeader::new(egui::RichText::new(t("Dischi rilevati")).strong().size(18.0)).default_open(false).show(ui, |ui| {
-                    for d in &self.disks_list {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&d.0).strong());
-                            ui.label(disk_label(&d.1));
-                        });
-                    }
-                    if self.disks_list.is_empty() {
-                        ui.label(t("Nessun disco rilevato."));
-                    }
-                });
-                ui.add_space(3.0);
-                egui::ComboBox::from_label(t("Disco"))
-                    .selected_text(self.disk_sel.clone())
-                    .width(520.0)
-                    .show_ui(ui, |ui| {
+                ui::card(ui, |ui| {
+                    ui::section(ui, "◔", "Salute disco", "Verifica lo stato S.M.A.R.T. dei dispositivi");
+                    ui.label(t("Verifica lo stato di salute dei dischi (richiede smartmontools)."));
+                    ui.add_space(4.0);
+                    egui::CollapsingHeader::new(egui::RichText::new(t("Dischi rilevati")).strong().size(16.0)).default_open(false).show(ui, |ui| {
                         for d in &self.disks_list {
-                            ui.selectable_value(&mut self.disk_sel, d.0.clone(), format!("{}  —  {}", d.0, disk_label(&d.1)));
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&d.0).strong());
+                                ui.label(egui::RichText::new(disk_label(&d.1)).color(ui::text_dim()));
+                            });
+                        }
+                        if self.disks_list.is_empty() {
+                            ui.label(t("Nessun disco rilevato."));
                         }
                     });
-                if let Some(d) = self.disks_list.iter().find(|d| d.0 == self.disk_sel) {
-                    let kind = d.1.split('\t').next().unwrap_or("");
-                    ui.label(
-                        egui::RichText::new(format!("{}: {}", t("Tipo di disco"), tr(kind)))
-                            .size(19.0)
-                            .strong()
-                            .color(ui::accent_text()),
-                    );
-                }
-                let dev = util::shq(&self.disk_sel);
-                let pre = "command -v smartctl >/dev/null 2>&1 || { echo 'Installa smartmontools: sudo apt install smartmontools'; exit 1; }; ";
-                ui.horizontal_wrapped(|ui| {
-                    self.run_btn(ui, ctx, t("Identificazione"), "smart", &format!("{pre}smartctl -i {dev}"), true, None);
-                    self.run_btn(ui, ctx, t("Stato e attributi"), "smart", &format!("{pre}smartctl -H -A {dev}"), true, None);
-                    self.run_btn(ui, ctx, t("Test rapido"), "smart", &format!("{pre}smartctl -t short {dev}"), true, None);
-                    self.run_btn(ui, ctx, t("Test esteso"), "smart", &format!("{pre}smartctl -t long {dev}"), true,
-                        Some(t("Il test esteso può durare ore (gira in background sul disco). Avviarlo?")));
-                    self.run_btn(ui, ctx, t("Log errori"), "smart", &format!("{pre}smartctl -l error {dev}"), true, None);
+                    ui.add_space(4.0);
+                    egui::ComboBox::from_label(t("Disco"))
+                        .selected_text(self.disk_sel.clone())
+                        .width(ui::fit_width(ui, 520.0, 180.0))
+                        .show_ui(ui, |ui| {
+                            for d in &self.disks_list {
+                                ui.selectable_value(&mut self.disk_sel, d.0.clone(), format!("{}  —  {}", d.0, disk_label(&d.1)));
+                            }
+                        });
+                    if let Some(d) = self.disks_list.iter().find(|d| d.0 == self.disk_sel) {
+                        let kind = d.1.split('\t').next().unwrap_or("");
+                        ui.label(
+                            egui::RichText::new(format!("{}: {}", t("Tipo di disco"), tr(kind)))
+                                .size(16.0)
+                                .strong()
+                                .color(ui::accent_text()),
+                        );
+                    }
+                    ui.add_space(4.0);
+                    let dev = util::shq(&self.disk_sel);
+                    let pre = "command -v smartctl >/dev/null 2>&1 || { echo 'Installa smartmontools: sudo apt install smartmontools'; exit 1; }; ";
+                    ui.horizontal_wrapped(|ui| {
+                        self.run_btn(ui, ctx, t("Identificazione"), "smart", &format!("{pre}smartctl -i {dev}"), true, None);
+                        self.run_btn(ui, ctx, t("Stato e attributi"), "smart", &format!("{pre}smartctl -H -A {dev}"), true, None);
+                        self.run_btn(ui, ctx, t("Test rapido"), "smart", &format!("{pre}smartctl -t short {dev}"), true, None);
+                        self.run_btn(ui, ctx, t("Test esteso"), "smart", &format!("{pre}smartctl -t long {dev}"), true,
+                            Some(t("Il test esteso può durare ore (gira in background sul disco). Avviarlo?")));
+                        self.run_btn(ui, ctx, t("Log errori"), "smart", &format!("{pre}smartctl -l error {dev}"), true, None);
+                    });
                 });
-                self.show_out(ui, "smart", 340.0);
+                ui.add_space(4.0);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "▤", "Risultato S.M.A.R.T.", "Output dei controlli sul disco selezionato");
+                    self.show_out(ui, "smart", 340.0);
+                });
             }
             1 => {
-                ui.label(t("Trova i file grandi e inutilizzati nella tua cartella personale."));
-                ui.horizontal(|ui| {
-                    ui.label(t("Dimensione minima (MB):"));
-                    ui.add(egui::DragValue::new(&mut self.min_mb).range(1..=100_000));
-                    ui.label(t("Inutilizzati da (giorni):"));
-                    ui.add(egui::DragValue::new(&mut self.min_days).range(0..=3650));
-                });
-                if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Cerca"))).clicked() {
-                    let (mb, days) = (self.min_mb, self.min_days);
-                    self.spawn(ctx, move |ch| {
-                        let home = util::shq(&util::home());
-                        let script = format!(
-                            "find {home} -xdev -type f -size +{mb}M -atime +{days} -printf '%s\\t%p\\n' 2>/dev/null | sort -rn | head -300"
-                        );
-                        let (_, o) = util::run_shell(&script, false);
-                        let files: Vec<BigFile> = o
-                            .lines()
-                            .filter_map(|l| {
-                                let (s, p) = l.split_once('\t')?;
-                                Some(BigFile { size: s.parse().ok()?, path: p.to_string(), sel: false })
-                            })
-                            .collect();
-                        ch.send(Msg::Log(format!("✔ Trovati {} file", files.len())));
-                        ch.send(Msg::BigFiles(files));
+                ui::card(ui, |ui| {
+                    ui::section(ui, "🔍", "File grandi", "Trova file pesanti e poco usati nella home");
+                    ui.label(t("Trova i file grandi e inutilizzati nella tua cartella personale."));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(t("Dimensione minima (MB):"));
+                        ui.add(egui::DragValue::new(&mut self.min_mb).range(1..=100_000));
+                        ui.label(t("Inutilizzati da (giorni):"));
+                        ui.add(egui::DragValue::new(&mut self.min_days).range(0..=3650));
+                        if ui::primary_button(ui, t("🔍 Cerca"), self.action_enabled()).clicked() {
+                            let (mb, days) = (self.min_mb, self.min_days);
+                            self.spawn(ctx, move |ch| {
+                                let home = util::shq(&util::home());
+                                let script = format!(
+                                    "find {home} -xdev -type f -size +{mb}M -atime +{days} -printf '%s\\t%p\\n' 2>/dev/null | sort -rn | head -300"
+                                );
+                                let (_, o) = util::run_shell(&script, false);
+                                let files: Vec<BigFile> = o
+                                    .lines()
+                                    .filter_map(|l| {
+                                        let (s, p) = l.split_once('\t')?;
+                                        Some(BigFile { size: s.parse().ok()?, path: p.to_string(), sel: false })
+                                    })
+                                    .collect();
+                                ch.send(Msg::Log(format!("✔ Trovati {} file", files.len())));
+                                ch.send(Msg::BigFiles(files));
+                            });
+                        }
                     });
-                }
-                let count = self.bigfiles.iter().filter(|f| f.sel).count();
-                egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                    for f in self.bigfiles.iter_mut() {
-                        ui.checkbox(&mut f.sel, format!("{}   {}", cleaner::fmt_bytes(f.size), f.path));
+                    ui.add_space(4.0);
+                    let count = self.bigfiles.iter().filter(|f| f.sel).count();
+                    egui::ScrollArea::vertical().max_height(240.0).auto_shrink([false, false]).show(ui, |ui| {
+                        for f in self.bigfiles.iter_mut() {
+                            ui.checkbox(&mut f.sel, format!("{}   {}", cleaner::fmt_bytes(f.size), f.path));
+                        }
+                    });
+                    ui.add_space(4.0);
+                    if ui.add_enabled(self.action_enabled() && count > 0, egui::Button::new(format!("🗑 {} ({count})", t("Elimina selezionati")))).clicked() {
+                        let all = self.bigfiles.clone();
+                        let job: Job = Box::new(move |ch| {
+                            let mut n = 0;
+                            for f in all.iter().filter(|f| f.sel) {
+                                match std::fs::remove_file(&f.path) {
+                                    Ok(_) => n += 1,
+                                    Err(e) => ch.send(Msg::Log(format!("✘ {}: {e}", f.path))),
+                                }
+                            }
+                            ch.send(Msg::Log(format!("✔ Eliminati {n} file")));
+                            let rest: Vec<BigFile> =
+                                all.into_iter().filter(|f| std::path::Path::new(&f.path).exists()).collect();
+                            ch.send(Msg::BigFiles(rest));
+                        });
+                        self.confirm = Some((tf("Eliminare definitivamente {} file? L'operazione non è reversibile.", &[&count]), job));
                     }
                 });
-                if ui.add_enabled(!self.busy && count > 0, egui::Button::new(format!("🗑 {} ({count})", t("Elimina selezionati")))).clicked() {
-                    let all = self.bigfiles.clone();
-                    let job: Job = Box::new(move |ch| {
-                        let mut n = 0;
-                        for f in all.iter().filter(|f| f.sel) {
-                            match std::fs::remove_file(&f.path) {
-                                Ok(_) => n += 1,
-                                Err(e) => ch.send(Msg::Log(format!("✘ {}: {e}", f.path))),
-                            }
-                        }
-                        ch.send(Msg::Log(format!("✔ Eliminati {n} file")));
-                        let rest: Vec<BigFile> =
-                            all.into_iter().filter(|f| std::path::Path::new(&f.path).exists()).collect();
-                        ch.send(Msg::BigFiles(rest));
-                    });
-                    self.confirm = Some((tf("Eliminare definitivamente {} file? L'operazione non è reversibile.", &[&count]), job));
-                }
             }
             2 => {
-                ui.label(t("Calcola la dimensione delle cartelle principali di un percorso."));
-                ui.horizontal(|ui| {
-                    ui.label(t("Percorso:"));
-                    ui.text_edit_singleline(&mut self.path_in);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "📏", "Spazio disco", "Calcola la dimensione delle cartelle principali");
+                    ui.label(t("Calcola la dimensione delle cartelle principali di un percorso."));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(t("Percorso:"));
+                        ui.add(egui::TextEdit::singleline(&mut self.path_in).desired_width(ui::fit_width(ui, 360.0, 120.0)));
+                    });
+                    ui.add_space(4.0);
+                    let script = format!(
+                        "du -xh --max-depth=1 {} 2>/dev/null | sort -rh | head -40",
+                        util::shq(&self.path_in)
+                    );
+                    ui.horizontal(|ui| {
+                        self.run_btn(ui, ctx, t("📏 Calcola"), "du", &script, false, None);
+                        if self.busy {
+                            ui.spinner();
+                        }
+                    });
                 });
-                let script = format!(
-                    "du -xh --max-depth=1 {} 2>/dev/null | sort -rh | head -40",
-                    util::shq(&self.path_in)
-                );
-                ui.horizontal(|ui| {
-                    self.run_btn(ui, ctx, t("📏 Calcola"), "du", &script, false, None);
+                ui.add_space(4.0);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "▤", "Risultato", "Cartelle ordinate per dimensione");
+                    self.show_out(ui, "du", 420.0);
+                });
+            }
+            _ => {
+                ui::card(ui, |ui| {
+                    ui::section(ui, "🔥", "Stress test", "Metti sotto sforzo CPU e RAM per verificare la stabilità");
+                    ui.label(t("Mette sotto sforzo processore e memoria per individuare instabilità."));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(t("Durata CPU (s):"));
+                        ui.add(egui::DragValue::new(&mut self.stress_secs).range(5..=600));
+                        if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔥 Stress CPU"))).clicked() {
+                            let s = self.stress_secs as u64;
+                            self.spawn(ctx, move |ch| {
+                                ch.send(Msg::Log(format!("▶ Stress CPU per {s} secondi...")));
+                                let r = cpu_stress(s);
+                                ch.send(Msg::Log(format!("✔ {r}")));
+                                ch.send(Msg::Out("stress", r));
+                            });
+                        }
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(t("Memoria da testare (MB):"));
+                        ui.add(egui::DragValue::new(&mut self.stress_mb).range(16..=16384));
+                        if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🧪 Test RAM"))).clicked() {
+                            let mb = self.stress_mb as usize;
+                            self.spawn(ctx, move |ch| {
+                                ch.send(Msg::Log(format!("▶ Test RAM su {mb} MB...")));
+                                let r = ram_test(mb);
+                                ch.send(Msg::Log(format!("✔ {r}")));
+                                ch.send(Msg::Out("stress", r));
+                            });
+                        }
+                    });
                     if self.busy {
+                        ui.add_space(4.0);
                         ui.spinner();
                     }
                 });
-                self.show_out(ui, "du", 420.0);
-            }
-            _ => {
-                ui.label(t("Mette sotto sforzo processore e memoria per individuare instabilità."));
-                ui.horizontal(|ui| {
-                    ui.label(t("Durata CPU (s):"));
-                    ui.add(egui::DragValue::new(&mut self.stress_secs).range(5..=600));
-                    if ui.add_enabled(!self.busy, egui::Button::new(t("🔥 Stress CPU"))).clicked() {
-                        let s = self.stress_secs as u64;
-                        self.spawn(ctx, move |ch| {
-                            ch.send(Msg::Log(format!("▶ Stress CPU per {s} secondi...")));
-                            let r = cpu_stress(s);
-                            ch.send(Msg::Log(format!("✔ {r}")));
-                            ch.send(Msg::Out("stress", r));
-                        });
-                    }
+                ui.add_space(4.0);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "▤", "Risultato", "Output del test eseguito");
+                    self.show_out(ui, "stress", 120.0);
                 });
-                ui.horizontal(|ui| {
-                    ui.label(t("Memoria da testare (MB):"));
-                    ui.add(egui::DragValue::new(&mut self.stress_mb).range(16..=16384));
-                    if ui.add_enabled(!self.busy, egui::Button::new(t("🧪 Test RAM"))).clicked() {
-                        let mb = self.stress_mb as usize;
-                        self.spawn(ctx, move |ch| {
-                            ch.send(Msg::Log(format!("▶ Test RAM su {mb} MB...")));
-                            let r = ram_test(mb);
-                            ch.send(Msg::Log(format!("✔ {r}")));
-                            ch.send(Msg::Out("stress", r));
-                        });
-                    }
-                });
-                if self.busy {
-                    ui.spinner();
-                }
-                self.show_out(ui, "stress", 120.0);
             }
         }
     }
 
     pub(crate) fn ui_procs(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "Processi");
+        ui::title(ui, t("Processi"));
         ui::hint(
             ui,
-            "Un processo è un programma in esecuzione. Qui vedi quali consumano più CPU e memoria. Se un programma si blocca, premi «Termina» per chiuderlo con gentilezza; se non risponde usa «Kill».",
+            t("Un processo è un programma in esecuzione. Qui vedi quali consumano più CPU e memoria. Se un programma si blocca, premi «Termina» per chiuderlo con gentilezza; se non risponde usa «Kill»."),
         );
-        ui.horizontal(|ui| {
-            ui.label(t("Filtro:"));
-            ui.text_edit_singleline(&mut self.proc_filter);
-        });
+
+        let total = self.procs.len();
         let f = self.proc_filter.to_lowercase();
-        let me = util::username();
-        let rows: Vec<&ProcRow> = self
+        let mut rows: Vec<ProcRow> = self
             .procs
             .iter()
-            .filter(|p| f.is_empty() || p.cmd.to_lowercase().contains(&f) || p.pid == f)
+            .filter(|p| {
+                f.is_empty()
+                    || p.cmd.to_lowercase().contains(&f)
+                    || p.pid.to_lowercase().contains(&f)
+                    || p.user.to_lowercase().contains(&f)
+            })
+            .cloned()
             .collect();
+
+        rows.sort_by(|a, b| {
+            let ord = match self.proc_sort.key {
+                ProcSortKey::Pid => a.pid.parse::<i64>().unwrap_or(0).cmp(&b.pid.parse::<i64>().unwrap_or(0)),
+                ProcSortKey::User => ui::cmp_alpha(&a.user, &b.user),
+                ProcSortKey::Cpu => ui::parse_f64_loose(&a.cpu).partial_cmp(&ui::parse_f64_loose(&b.cpu)).unwrap_or(std::cmp::Ordering::Equal),
+                ProcSortKey::Mem => ui::parse_f64_loose(&a.mem).partial_cmp(&ui::parse_f64_loose(&b.mem)).unwrap_or(std::cmp::Ordering::Equal),
+                ProcSortKey::Cmd => ui::cmp_alpha(&a.cmd, &b.cmd),
+            };
+            match self.proc_sort.dir {
+                ui::SortDir::Asc => ord,
+                ui::SortDir::Desc => ord.reverse(),
+            }
+        });
+
+        let shown = rows.len();
+        ui::filter_bar(ui, &mut self.proc_filter, shown, total);
+
+        let visible_pids: Vec<String> = rows.iter().map(|p| p.pid.clone()).collect();
+        let selected_visible = visible_pids.iter().filter(|p| self.proc_selected.contains(*p)).count();
+        let sel_action = ui::selection_controls(ui, selected_visible, shown);
+        match sel_action {
+            ui::SelectionAction::All => {
+                for pid in &visible_pids {
+                    if !self.proc_selected.contains(pid) {
+                        self.proc_selected.push(pid.clone());
+                    }
+                }
+            }
+            ui::SelectionAction::NoneSelected => {
+                self.proc_selected.retain(|p| !visible_pids.contains(p));
+            }
+            ui::SelectionAction::None => {}
+        }
+
+        let me = util::username();
         let mut act: Option<(String, &'static str, bool)> = None;
+        let mut bulk: Option<(&'static str, bool)> = None;
+
+        let w = ui.available_width();
+        let sel_w = 32.0;
+        let pid_w = (w * 0.08).clamp(44.0, 64.0);
+        let user_w = (w * 0.12).clamp(56.0, 100.0);
+        let num_w = (w * 0.08).clamp(44.0, 62.0);
+        let act_w = (w * 0.18).clamp(120.0, 170.0);
+
         TableBuilder::new(ui)
             .id_salt("procs")
             .striped(true)
@@ -811,23 +936,38 @@ impl App {
             .max_scroll_height(300.0)
             .auto_shrink([false, false])
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::exact(70.0))
-            .column(Column::initial(110.0).at_least(80.0))
-            .column(Column::exact(65.0))
-            .column(Column::exact(65.0))
-            .column(Column::remainder().at_least(180.0))
-            .column(Column::exact(120.0))
-            .header(20.0, |mut header| {
-                header.col(|ui| { ui.strong(t("PID")); });
-                header.col(|ui| { ui.strong(t("Utente")); });
-                header.col(|ui| { ui.strong(t("%CPU")); });
-                header.col(|ui| { ui.strong(t("%MEM")); });
-                header.col(|ui| { ui.strong(t("Comando")); });
-                header.col(|ui| { ui.strong(t("Azioni")); });
+            .column(Column::exact(sel_w))
+            .column(Column::initial(pid_w).at_least(40.0))
+            .column(Column::initial(user_w).at_least(56.0))
+            .column(Column::initial(num_w).at_least(40.0))
+            .column(Column::initial(num_w).at_least(40.0))
+            .column(Column::remainder().at_least(90.0))
+            .column(Column::initial(act_w).at_least(110.0))
+            .header(22.0, |mut header| {
+                header.col(|ui| { ui::table_head(ui, "✓"); });
+                header.col(|ui| { ui::sort_header(ui, t("PID"), ProcSortKey::Pid, &mut self.proc_sort); });
+                header.col(|ui| { ui::sort_header(ui, t("Utente"), ProcSortKey::User, &mut self.proc_sort); });
+                header.col(|ui| { ui::sort_header(ui, t("%CPU"), ProcSortKey::Cpu, &mut self.proc_sort); });
+                header.col(|ui| { ui::sort_header(ui, t("%MEM"), ProcSortKey::Mem, &mut self.proc_sort); });
+                header.col(|ui| { ui::sort_header(ui, t("Comando"), ProcSortKey::Cmd, &mut self.proc_sort); });
+                header.col(|ui| { ui::table_head(ui, t("Azioni")); });
             })
             .body(|body| {
-                body.rows(21.0, rows.len(), |mut row| {
-                    let p = rows[row.index()];
+                body.rows(22.0, rows.len(), |mut row| {
+                    let p = &rows[row.index()];
+                    let pid = p.pid.clone();
+                    row.col(|ui| {
+                        let mut checked = self.proc_selected.contains(&pid);
+                        if ui.checkbox(&mut checked, "").changed() {
+                            if checked {
+                                if !self.proc_selected.contains(&pid) {
+                                    self.proc_selected.push(pid.clone());
+                                }
+                            } else {
+                                self.proc_selected.retain(|x| x != &pid);
+                            }
+                        }
+                    });
                     row.col(|ui| { ui.label(&p.pid); });
                     row.col(|ui| { ui.label(&p.user); });
                     row.col(|ui| { ui.label(&p.cpu); });
@@ -843,6 +983,41 @@ impl App {
                     });
                 });
             });
+
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let n = self.proc_selected.len();
+            if ui.add_enabled(n > 0 && self.action_enabled(), egui::Button::new(tf("Termina selezionati ({})", &[&n.to_string()]))).clicked() {
+                bulk = Some(("TERM", false));
+            }
+            if ui.add_enabled(n > 0 && self.action_enabled(), egui::Button::new(tf("Kill selezionati ({})", &[&n.to_string()]))).clicked() {
+                bulk = Some(("KILL", false));
+            }
+            if ui.small_button(t("Deseleziona tutto")).clicked() {
+                self.proc_selected.clear();
+            }
+        });
+
+        if let Some((sig, _)) = bulk {
+            let targets: Vec<(String, bool)> = self
+                .procs
+                .iter()
+                .filter(|p| self.proc_selected.contains(&p.pid))
+                .map(|p| (p.pid.clone(), p.user != me))
+                .collect();
+            let pids: Vec<String> = targets
+                .iter()
+                .filter(|(pid, _)| pid.chars().all(|c| c.is_ascii_digit()))
+                .map(|(pid, _)| pid.clone())
+                .collect();
+            let privileged = targets.iter().any(|(_, privi)| *privi);
+            if !pids.is_empty() {
+                let args = pids.join(" ");
+                self.spawn(ctx, cmd_job("proc", format!("kill -{sig} {args}"), privileged));
+                self.proc_selected.clear();
+            }
+        }
+
         if let Some((pid, sig, privileged)) = act {
             if pid.chars().all(|c| c.is_ascii_digit()) {
                 self.spawn(ctx, cmd_job("proc", format!("kill -{sig} {pid}"), privileged));
@@ -851,36 +1026,69 @@ impl App {
     }
 
     pub(crate) fn ui_apps(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "App installate");
+        ui::title(ui, t("App installate"));
         ui::sub_tabs(ui, &mut self.sub, &["Pacchetti APT", "Pacchetti Flatpak"]);
         let apt = self.sub == 0;
         if apt {
             ui::hint(
                 ui,
-                "I pacchetti APT sono i programmi installati dal gestore software di Debian. Cerca il nome e premi il cestino per disinstallare quello che non ti serve: ti verrà chiesta conferma.",
+                t("I pacchetti APT sono i programmi installati dal gestore software di Debian. Cerca il nome e premi il cestino per disinstallare quello che non ti serve: ti verrà chiesta conferma."),
             );
         } else {
             ui::hint(
                 ui,
-                "Flatpak è un altro modo di installare programmi: ognuno vive in una «scatola» separata dal resto del sistema. Qui vedi le app Flatpak e puoi disinstallarle con il cestino.",
+                t("Flatpak è un altro modo di installare programmi: ognuno vive in una «scatola» separata dal resto del sistema. Qui vedi le app Flatpak e puoi disinstallarle con il cestino."),
             );
         }
-        ui.horizontal(|ui| {
-            ui.label(t("Cerca:"));
-            ui.text_edit_singleline(&mut self.pkg_filter);
+
+        let total = self.pkgs.iter().filter(|p| p.apt == apt).count();
+        let f = self.pkg_filter.to_lowercase();
+        let mut rows: Vec<Pkg> = self
+            .pkgs
+            .iter()
+            .filter(|p| p.apt == apt && (f.is_empty() || p.name.to_lowercase().contains(&f) || p.version.to_lowercase().contains(&f)))
+            .cloned()
+            .collect();
+
+        rows.sort_by(|a, b| {
+            let ord = match self.pkg_sort.key {
+                AppSortKey::Name => ui::cmp_alpha(&a.name, &b.name),
+                AppSortKey::Version => ui::cmp_alpha(&a.version, &b.version),
+            };
+            match self.pkg_sort.dir {
+                ui::SortDir::Asc => ord,
+                ui::SortDir::Desc => ord.reverse(),
+            }
+        });
+
+        let shown = rows.len();
+        ui.horizontal_wrapped(|ui| {
+            ui::filter_bar(ui, &mut self.pkg_filter, shown, total);
             if ui.button(t("🔄 Ricarica")).clicked() {
                 self.load_pkgs(ctx);
             }
         });
-        let f = self.pkg_filter.to_lowercase();
+
+        let visible_names: Vec<String> = rows.iter().map(|p| p.name.clone()).collect();
+        let selected_visible = visible_names.iter().filter(|n| self.pkg_selected.contains(*n)).count();
+        let sel_action = ui::selection_controls(ui, selected_visible, shown);
+        match sel_action {
+            ui::SelectionAction::All => {
+                for n in &visible_names {
+                    if !self.pkg_selected.contains(n) {
+                        self.pkg_selected.push(n.clone());
+                    }
+                }
+            }
+            ui::SelectionAction::NoneSelected => {
+                self.pkg_selected.retain(|n| !visible_names.contains(n));
+            }
+            ui::SelectionAction::None => {}
+        }
+
         let mut rm: Option<String> = None;
-        let rows: Vec<&Pkg> = self
-            .pkgs
-            .iter()
-            .filter(|p| p.apt == apt && (f.is_empty() || p.name.to_lowercase().contains(&f)))
-            .collect();
-        ui.label(format!("{} {}{}", rows.len(), t("pacchetti"), if rows.len() > 300 { t(" (mostrati i primi 300: usa la ricerca)") } else { "" }));
-        let shown = rows.len().min(300);
+        let mut bulk_remove = false;
+
         TableBuilder::new(ui)
             .id_salt(if apt { "apps_apt" } else { "apps_flatpak" })
             .striped(true)
@@ -888,26 +1096,82 @@ impl App {
             .max_scroll_height(300.0)
             .auto_shrink([false, false])
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::exact(32.0))
             .column(Column::exact(36.0))
             .column(Column::remainder().at_least(180.0))
-            .column(Column::initial(120.0).at_least(90.0))
-            .header(20.0, |mut header| {
+            .column(Column::initial(140.0).at_least(90.0))
+            .header(22.0, |mut header| {
+                header.col(|ui| { ui::table_head(ui, "✓"); });
                 header.col(|_| {});
-                header.col(|ui| { ui.strong(t("Pacchetto")); });
-                header.col(|ui| { ui.strong(t("Versione")); });
+                header.col(|ui| { ui::sort_header(ui, t("Pacchetto"), AppSortKey::Name, &mut self.pkg_sort); });
+                header.col(|ui| { ui::sort_header(ui, t("Versione"), AppSortKey::Version, &mut self.pkg_sort); });
             })
             .body(|body| {
-                body.rows(21.0, shown, |mut row| {
-                    let p = rows[row.index()];
+                body.rows(22.0, rows.len(), |mut row| {
+                    let p = &rows[row.index()];
+                    let name = p.name.clone();
+                    row.col(|ui| {
+                        let mut checked = self.pkg_selected.contains(&name);
+                        if ui.checkbox(&mut checked, "").changed() {
+                            if checked {
+                                if !self.pkg_selected.contains(&name) {
+                                    self.pkg_selected.push(name.clone());
+                                }
+                            } else {
+                                self.pkg_selected.retain(|x| x != &name);
+                            }
+                        }
+                    });
                     row.col(|ui| {
                         if ui.small_button("🗑").on_hover_text(t("Disinstalla")).clicked() {
-                            rm = Some(p.name.clone());
+                            rm = Some(name.clone());
                         }
                     });
                     row.col(|ui| { ui.label(&p.name); });
                     row.col(|ui| { ui.label(&p.version); });
                 });
             });
+
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let n = self.pkg_selected.iter().filter(|x| visible_names.contains(*x)).count();
+            if ui
+                .add_enabled(n > 0 && self.action_enabled(), egui::Button::new(tf("Disinstalla selezionati ({})", &[&n.to_string()])))
+                .clicked()
+            {
+                bulk_remove = true;
+            }
+            if ui.small_button(t("Deseleziona tutto")).clicked() {
+                self.pkg_selected.retain(|n| !visible_names.contains(n));
+            }
+        });
+
+        if bulk_remove {
+            let targets: Vec<String> = self
+                .pkg_selected
+                .iter()
+                .filter(|n| visible_names.contains(*n))
+                .cloned()
+                .collect();
+            if !targets.is_empty() {
+                let args = targets.iter().map(|s| util::shq(s)).collect::<Vec<_>>().join(" ");
+                let script = if apt {
+                    format!("apt-get -y purge {args}")
+                } else {
+                    format!("flatpak uninstall -y --noninteractive {args}")
+                };
+                let msg = tf("Disinstallare {} pacchetti selezionati?", &[&targets.len().to_string()]);
+                let job: Job = Box::new(move |ch| {
+                    let (ok, out) = util::run_shell(&script, apt);
+                    let mark = if ok { "✔" } else { "✘" };
+                    ch.send(Msg::Log(format!("{mark} {}", util::tail(out.trim(), 3).replace('\n', " | "))));
+                    ch.send(Msg::Pkgs(read_pkgs()));
+                });
+                self.pkg_selected.retain(|n| !targets.contains(n));
+                self.confirm = Some((msg, job));
+            }
+        }
+
         if let Some(name) = rm {
             let q = util::shq(&name);
             let script = if apt {
@@ -927,52 +1191,64 @@ impl App {
 
     pub(crate) fn ui_zram(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::title(ui, "Ottimizza RAM (zRAM)");
-        ui.label(t("Crea una memoria compressa virtuale nella RAM fisica per migliorare le prestazioni quando la memoria scarseggia."));
-        ui.add_space(3.0);
-        let total_mb = (self.info.sys.total_memory() / 1024 / 1024).max(512) as u32;
-        if self.zram_mb == 0 {
-            self.zram_mb = (total_mb / 2).max(256);
-        }
-        ui.add(egui::Slider::new(&mut self.zram_mb, 256..=total_mb).text(t("Dimensione zRAM (MB)")));
-        let mb = self.zram_mb;
-        ui.horizontal(|ui| {
-            let on = format!(
-                "swapoff /dev/zram0 2>/dev/null; modprobe zram num_devices=1 2>/dev/null; \
-                 echo 1 > /sys/block/zram0/reset 2>/dev/null; \
-                 echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null; \
-                 echo {mb}M > /sys/block/zram0/disksize && mkswap /dev/zram0 && swapon -p 100 /dev/zram0 && echo 'zRAM attivata'"
-            );
-            self.run_btn(ui, ctx, t("⚡ Ottimizza RAM"), "zram", &on, true, None);
-            self.run_btn(
-                ui,
-                ctx,
-                t("⏻ Disattiva zRAM"),
-                "zram",
-                "swapoff /dev/zram0; echo 1 > /sys/block/zram0/reset && echo 'zRAM disattivata'",
-                true,
-                None,
-            );
+        ui::card(ui, |ui| {
+            ui::section(ui, "⚡", "Ottimizza RAM (zRAM)", "Memoria compressa nella RAM per migliorare la reattività");
+            ui.label(t("Crea una memoria compressa virtuale nella RAM fisica per migliorare le prestazioni quando la memoria scarseggia."));
+            ui.add_space(4.0);
+            let total_mb = (self.info.sys.total_memory() / 1024 / 1024).max(512) as u32;
+            if self.zram_mb == 0 {
+                self.zram_mb = (total_mb / 2).max(256);
+            }
+            ui.add(egui::Slider::new(&mut self.zram_mb, 256..=total_mb).text(t("Dimensione zRAM (MB)")));
+            let mb = self.zram_mb;
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                let on = format!(
+                    "swapoff /dev/zram0 2>/dev/null; modprobe zram num_devices=1 2>/dev/null; \
+                     echo 1 > /sys/block/zram0/reset 2>/dev/null; \
+                     echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null; \
+                     echo {mb}M > /sys/block/zram0/disksize && mkswap /dev/zram0 && swapon -p 100 /dev/zram0 && echo 'zRAM attivata'"
+                );
+                self.run_btn(ui, ctx, t("⚡ Ottimizza RAM"), "zram", &on, true, None);
+                self.run_btn(
+                    ui,
+                    ctx,
+                    t("⏻ Disattiva zRAM"),
+                    "zram",
+                    "swapoff /dev/zram0; echo 1 > /sys/block/zram0/reset && echo 'zRAM disattivata'",
+                    true,
+                    None,
+                );
+            });
         });
-        ui.add_space(3.0);
-        ui.heading(t("Stato attuale"));
-        match zram_info() {
-            Some(z) => {
-                ui.add(ui::bar(z.orig as f32 / z.size.max(1) as f32).text(tf(
-                    "Occupazione: {} / {}",
-                    &[&cleaner::fmt_bytes(z.orig), &cleaner::fmt_bytes(z.size)],
-                )));
-                ui.label(tf("Algoritmo di compressione: {}", &[&z.algo]));
-                if z.compr > 0 {
-                    ui.label(tf("Rapporto di compressione: {}:1", &[&format!("{:.1}", z.orig as f32 / z.compr as f32)]));
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▤", "Stato attuale", "Utilizzo e compressione della zRAM");
+            match zram_info() {
+                Some(z) => {
+                    let frac = z.orig as f32 / z.size.max(1) as f32;
+                    ui.add(ui::bar(frac).fill(ui::semantic_text(ui::level_color(frac))).text(tf(
+                        "Occupazione: {} / {}",
+                        &[&cleaner::fmt_bytes(z.orig), &cleaner::fmt_bytes(z.size)],
+                    )));
+                    ui.add_space(4.0);
+                    ui.label(tf("Algoritmo di compressione: {}", &[&z.algo]));
+                    if z.compr > 0 {
+                        ui.label(tf("Rapporto di compressione: {}:1", &[&format!("{:.1}", z.orig as f32 / z.compr as f32)]));
+                    }
+                }
+                None => {
+                    ui::led(ui, Some(false), t("zRAM non attiva."));
                 }
             }
-            None => {
-                ui.label(t("zRAM non attiva."));
-            }
-        }
-        ui.add_space(3.0);
-        ui.label(egui::RichText::new(t("Nota: la configurazione vale fino al riavvio.")).color(crate::ui::text_dim()));
-        self.show_out(ui, "zram", 100.0);
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(t("Nota: la configurazione vale fino al riavvio.")).color(crate::ui::text_dim()));
+        });
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▣", "Output", "Risultato delle operazioni zRAM");
+            self.show_out(ui, "zram", 100.0);
+        });
     }
 
     fn cooling_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -994,7 +1270,7 @@ impl App {
                 ui,
                 Some(active),
                 &if active {
-                    format!("{} ({} / {} MHz)", t("Raffreddamento attivo"), cur / 1000, max / 1000)
+                    tf("Raffreddamento attivo ({} / {} MHz)", &[&(cur / 1000), &(max / 1000)])
                 } else {
                     t("Raffreddamento non attivo (velocità normale)").to_string()
                 },
@@ -1008,10 +1284,25 @@ impl App {
                        if [ ! -s \"$P\" ] && [ -s /var/lib/debclean/power_profile_orig ]; then P=/var/lib/debclean/power_profile_orig; fi; \
                        if [ -s \"$P\" ] && command -v powerprofilesctl >/dev/null 2>&1; then powerprofilesctl set \"$(cat \"$P\")\"; fi; echo 'OK'";
             ui.horizontal_wrapped(|ui| {
-                self.run_btn(
-                    ui, ctx, t("Attiva modalità di raffreddamento"), "cool", &on, true,
-                    Some(t("Attivare la modalità di raffreddamento? Il processore sarà limitato al 70% della velocità massima.")),
+                let activate = ui.add_enabled(
+                    self.action_enabled() && !active,
+                    egui::Button::new(t("Attiva modalità di raffreddamento")),
                 );
+                let activate = if active {
+                    activate.on_hover_text(t("La modalità di raffreddamento è già attiva."))
+                } else {
+                    activate
+                };
+                if activate.clicked() {
+                    let job = cmd_job("cool", on.clone(), true);
+                    self.confirm = Some((
+                        t(
+                            "Attivare la modalità di raffreddamento? Il processore sarà limitato al 70% della velocità massima.",
+                        )
+                        .to_string(),
+                        job,
+                    ));
+                }
                 self.run_btn(ui, ctx, t("Disattiva e ripristina"), "cool", off, true, None);
             });
         });
@@ -1021,18 +1312,23 @@ impl App {
     pub(crate) fn ui_temps(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::title(ui, "Monitor temperature");
         self.cooling_card(ui, ctx);
-        ui.add_space(3.0);
-        if self.info.temps.is_empty() {
-            ui.label(t("Nessun sensore rilevato. Installa e configura lm-sensors: sudo apt install lm-sensors && sudo sensors-detect"));
-            return;
-        }
-        for (l, tmp) in &self.info.temps {
-            ui.add(
-                ui::bar((*tmp / 100.0).clamp(0.0, 1.0))
-                    .fill(ui::heat_color(*tmp))
-                    .text(format!("{l}: {tmp:.0} °C")),
-            );
-        }
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "🌡", "Temperature", "Sensori termici rilevati dal sistema");
+            if self.info.temps.is_empty() {
+                ui.label(t("Nessun sensore rilevato. Installa e configura lm-sensors: sudo apt install lm-sensors && sudo sensors-detect"));
+                return;
+            }
+            for (l, tmp) in &self.info.temps {
+                let frac = (*tmp / 100.0).clamp(0.0, 1.0);
+                ui.add(
+                    ui::bar(frac)
+                        .fill(ui::heat_color(*tmp))
+                        .text(format!("{l}: {tmp:.0} °C")),
+                );
+                ui.add_space(2.0);
+            }
+        });
     }
 
     pub(crate) fn ui_network(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1045,34 +1341,47 @@ impl App {
             Some(n) => (n.gw, n.dns, n.inet),
             None => (None, None, None),
         };
-        ui::led(ui, g, t("Gateway locale (router)"));
-        ui::led(ui, d, t("Servizio DNS"));
-        ui::led(ui, i, t("Connessione Internet"));
-        ui.add_space(3.0);
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Test diagnostico"))).clicked() {
-                self.spawn(ctx, |ch| ch.send(Msg::Net(net_test())));
-            }
-            self.run_btn(
-                ui,
-                ctx,
-                t("♻ Ripristina rete e Wi-Fi"),
-                "net",
-                "systemctl restart NetworkManager && echo 'NetworkManager riavviato'",
-                true,
-                Some(t("Riavviare NetworkManager? La connessione cadrà per qualche secondo.")),
-            );
-            if self.busy {
-                ui.spinner();
-            }
+        ui::card(ui, |ui| {
+            ui::section(ui, "◎", "Diagnostica di rete", "Verifica rapida di gateway, DNS e Internet");
+            ui::led(ui, g, t("Gateway locale (router)"));
+            ui.add_space(2.0);
+            ui::led(ui, d, t("Servizio DNS"));
+            ui.add_space(2.0);
+            ui::led(ui, i, t("Connessione Internet"));
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Test diagnostico"))).clicked() {
+                    self.spawn(ctx, |ch| ch.send(Msg::Net(net_test())));
+                }
+                self.run_btn(
+                    ui,
+                    ctx,
+                    t("♻ Ripristina rete e Wi-Fi"),
+                    "net",
+                    "systemctl restart NetworkManager && echo 'NetworkManager riavviato'",
+                    true,
+                    Some(t("Riavviare NetworkManager? La connessione cadrà per qualche secondo.")),
+                );
+                if self.busy {
+                    ui.spinner();
+                }
+            });
         });
-        ui.add_space(3.0);
-        ui.heading(t("Interfacce"));
-        ui.label(egui::RichText::new(if self.info.net.is_empty() { t("Nessuna interfaccia con IP") } else { &self.info.net }).monospace());
-        ui.add_space(5.0);
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▤", "Interfacce", "Indirizzi e interfacce di rete attive");
+            ui::output_box(ui, if self.info.net.is_empty() { t("Nessuna interfaccia con IP") } else { &self.info.net }, 120.0);
+            ui.add_space(4.0);
+            let gateway = if self.info.gateway.is_empty() { t("n/d") } else { self.info.gateway.as_str() };
+            ui.label(egui::RichText::new(tf("Gateway: {}", &[&gateway])).strong());
+        });
+        ui.add_space(4.0);
         self.ui_vpn(ui, ctx);
-        ui.label(format!("Gateway: {}", if self.info.gateway.is_empty() { t("n/d") } else { &self.info.gateway }));
-        self.show_out(ui, "net", 80.0);
+        ui.add_space(4.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▣", "Output rete", "Risultato dei comandi di rete");
+            self.show_out(ui, "net", 100.0);
+        });
     }
 
 pub(crate) fn ui_about(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {

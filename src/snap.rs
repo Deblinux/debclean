@@ -1,3 +1,4 @@
+use crate::i18n::t;
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -13,15 +14,15 @@ pub fn get_installed_snaps() -> Result<Vec<SnapApp>, &'static str> {
     let output = match Command::new("snap").arg("list").output() {
         Ok(out) => out,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err("Snap non è installato sul sistema.");
+            return Err(t("Snap non è installato sul sistema."));
         }
         Err(_) => {
-            return Err("Impossibile eseguire il comando snap.");
+            return Err(t("Impossibile eseguire il comando snap."));
         }
     };
 
     if !output.status.success() {
-        return Err("Il servizio snapd non è attivo sul sistema.");
+        return Err(t("Il servizio snapd non è attivo sul sistema."));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

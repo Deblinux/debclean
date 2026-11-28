@@ -542,10 +542,10 @@ fn scan_node(home: &Path, progress: &mut impl FnMut(f32, &str)) -> Vec<Item> {
     }
 
     for (rel, label) in [
-        (".npm", "Cache npm"),
-        (".cache/yarn", "Cache Yarn"),
-        (".cache/pnpm", "Cache pnpm"),
-        (".local/share/pnpm/store", "Store pnpm"),
+        (".npm", t("Cache npm")),
+        (".cache/yarn", t("Cache Yarn")),
+        (".cache/pnpm", t("Cache pnpm")),
+        (".local/share/pnpm/store", t("Store pnpm")),
     ] {
         if let Some(item) = cache_item(home, rel, label) {
             items.push(item);
@@ -557,7 +557,7 @@ fn scan_node(home: &Path, progress: &mut impl FnMut(f32, &str)) -> Vec<Item> {
 fn scan_python(home: &Path, progress: &mut impl FnMut(f32, &str)) -> Vec<Item> {
     progress(0.4, t("Analisi delle cache Python..."));
     let mut items = Vec::new();
-    for (rel, label) in [(".cache/pip", "Cache pip"), (".cache/uv", "Cache uv")] {
+    for (rel, label) in [(".cache/pip", t("Cache pip")), (".cache/uv", t("Cache uv"))] {
         if let Some(item) = cache_item(home, rel, label) {
             items.push(item);
         }
@@ -701,23 +701,6 @@ pub fn clean_selected<F: FnMut(usize, usize, &str)>(
 
 // ---- UI ---------------------------------------------------------------------------------------
 
-/// Badge compatto con colori derivati dagli helper tema-aware di `ui.rs`.
-fn pill(ui: &mut egui::Ui, text: &str, tint: egui::Color32) {
-    egui::Frame::default()
-        .fill(ui::alpha(tint, if ui::is_dark() { 42 } else { 26 }))
-        .stroke(egui::Stroke::new(1.0_f32, ui::alpha(tint, 130)))
-        .rounding(6.0)
-        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .size(12.0)
-                    .strong()
-                    .color(ui::semantic_text(tint)),
-            );
-        });
-}
-
 fn category_glyph(id: CategoryId) -> &'static str {
     match id {
         CategoryId::Container => "▣",
@@ -789,10 +772,10 @@ impl App {
         );
 
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Scansiona di nuovo"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Scansiona di nuovo"))).clicked() {
                 self.dev_scan(ctx);
             }
-            if ui::primary_button(ui, t("Pulisci selezionati"), !self.busy && self.dev_report.has_selection()).clicked() {
+            if ui::primary_button(ui, t("Pulisci selezionati"), self.action_enabled() && self.dev_report.has_selection()).clicked() {
                 self.dev_clean(ctx);
             }
             if self.busy {
@@ -832,12 +815,12 @@ impl App {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if cat.installed {
-                            pill(ui, t("Installato"), ui::GOOD);
+                            ui::pill(ui, t("Installato"), ui::GOOD);
                             if !cat.version.is_empty() {
                                 ui.label(egui::RichText::new(&cat.version).size(11.5).color(ui::text_dim()));
                             }
                         } else {
-                            pill(ui, t("Non installato"), ui::WARN);
+                            ui::pill(ui, t("Non installato"), ui::WARN);
                         }
                     });
                 });
@@ -888,7 +871,7 @@ impl App {
                                                 .color(ui::accent_text()),
                                         );
                                         if item.stale {
-                                            pill(ui, t("Inattivo >30 gg"), ui::WARN);
+                                            ui::pill(ui, t("Inattivo >30 gg"), ui::WARN);
                                         }
                                     });
                                 });

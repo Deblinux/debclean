@@ -149,8 +149,9 @@ impl App {
 
     fn ui_local_mounts(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!self.busy, egui::Button::new(t("🔄 Aggiorna dispositivi"))).clicked() {
+            ui::section(ui, "💾", "Dischi e USB", "Gestisci montaggio e smontaggio sicuro dei dispositivi");
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔄 Aggiorna dispositivi"))).clicked() {
                     self.load_mounts(ctx);
                 }
                 if self.busy {
@@ -159,7 +160,7 @@ impl App {
             });
         });
 
-        ui.add_space(3.0);
+        ui.add_space(4.0);
 
         if self.mounts_state.entries.is_empty() {
             ui::card(ui, |ui| {
@@ -169,7 +170,7 @@ impl App {
             let entries = self.mounts_state.entries.clone();
             for item in entries {
                 ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui::led(ui, Some(item.mounted), "");
                         ui.label(egui::RichText::new(&item.device).strong().size(17.0));
                         if !item.fstype.is_empty() {
@@ -181,7 +182,7 @@ impl App {
                         if item.removable {
                             ui.colored_label(ui::semantic_text(ui::WARN), t("Rimob./USB"));
                         }
-let is_protected =
+                        let is_protected =
                             item.mountpoint == "/" || item.mountpoint == "[SWAP]" || item.fstype == "swap";
                         let dev_q = util::shq(&item.device);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -191,7 +192,7 @@ let is_protected =
                                 }
                                 if ui
                                     .add_enabled(
-                                        !self.busy && !is_protected,
+                                        self.action_enabled() && !is_protected,
                                         egui::Button::new(
                                         egui::RichText::new(t("⏏ Smonta in sicurezza")).color(egui::Color32::from_rgb(20, 20, 20)),
 )
@@ -208,7 +209,7 @@ let is_protected =
                                         ch.send(Msg::Mounts(read_mounts()));
                                     });
                                 }
-                            } else if ui::primary_button(ui, t("📌 Monta"), !self.busy).clicked() {
+                            } else if ui::primary_button(ui, t("📌 Monta"), self.action_enabled()).clicked() {
                                 let script = format!(
                                     "if command -v udisksctl >/dev/null 2>&1; then udisksctl mount -b {dev_q} --no-user-interaction; else mkdir -p /mnt/debutility_mount && mount {dev_q} /mnt/debutility_mount; fi"
                                 );
@@ -228,11 +229,14 @@ let is_protected =
                     };
                     ui.label(egui::RichText::new(mp_text).size(14.0).color(ui::text_dim()));
                 });
-                ui.add_space(2.0);
+                ui.add_space(4.0);
             }
         }
 
-        self.show_out(ui, "mounts", 180.0);
+        ui::card(ui, |ui| {
+            ui::section(ui, "▣", "Output", "Risultato delle operazioni di montaggio");
+            self.show_out(ui, "mounts", 180.0);
+        });
     }
 
     fn ui_network_shares(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -242,7 +246,9 @@ let is_protected =
         let have_tool = util::run_shell(&format!("command -v {} >/dev/null 2>&1", util::shq(tool)), false).0;
 
         ui::card(ui, |ui| {
+            ui::section(ui, "🔗", "Condivisioni di rete", "Configura e monta SMB, NFS o SSHFS");
             ui.label(egui::RichText::new(t("Tipo di condivisione")).strong());
+            ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
                 ui.selectable_value(&mut self.mounts_state.share_kind, NetShareKind::Smb, "SMB / CIFS");
                 ui.selectable_value(&mut self.mounts_state.share_kind, NetShareKind::Nfs, "NFS");
@@ -250,9 +256,9 @@ let is_protected =
             });
 
             if !have_tool {
-                ui.add_space(3.0);
+                ui.add_space(4.0);
                 ui.colored_label(
-                    ui::WARN,
+                    ui::semantic_text(ui::WARN),
                     format!(
                         "{} ({pkg}) {}",
                         t("Strumento di rete non installato"),
@@ -271,38 +277,38 @@ let is_protected =
                 );
             }
 
-            ui.add_space(3.0);
-            ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("Server / IP:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.mounts_state.host)
-                        .hint_text("es. 192.168.1.50 o nas.local")
-                        .desired_width(240.0),
+                        .hint_text(t("es. 192.168.1.50 o nas.local"))
+                        .desired_width(ui::fit_width(ui, 240.0, 110.0)),
                 );
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("Cartella remota:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.mounts_state.remote_path)
-                        .hint_text("es. /Documenti o Media")
-                        .desired_width(240.0),
+                        .hint_text(t("es. /Documenti o Media"))
+                        .desired_width(ui::fit_width(ui, 240.0, 110.0)),
                 );
             });
             if kind != NetShareKind::Nfs {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(t("Utente (opzionale):"));
                     ui.add(
                         egui::TextEdit::singleline(&mut self.mounts_state.username)
-                            .hint_text("es. mario")
-                            .desired_width(200.0),
+                            .hint_text(t("es. mario"))
+                            .desired_width(ui::fit_width(ui, 200.0, 100.0)),
                     );
                 });
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(t("Nome cartella locale:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.mounts_state.local_name)
-                        .desired_width(200.0),
+                        .desired_width(ui::fit_width(ui, 200.0, 100.0)),
                 );
             });
 
@@ -319,8 +325,8 @@ let is_protected =
             let user_clean = self.mounts_state.username.trim().to_string();
             let valid = !host_clean.is_empty() && !rem_clean.is_empty() && have_tool;
 
-            ui.add_space(3.0);
-            ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
                 let q_mp = util::shq(&local_mp);
                 let mount_cmd = match kind {
                     NetShareKind::Smb => {
@@ -354,12 +360,12 @@ let is_protected =
                 };
 
                 let needs_priv = kind != NetShareKind::Sshfs;
-                if ui.add_enabled(valid && !self.busy, egui::Button::new(t("🔗 Monta cartella di rete"))).clicked() {
+                if ui.add_enabled(valid && self.action_enabled(), egui::Button::new(t("🔗 Monta cartella di rete"))).clicked() {
                     self.spawn(ctx, crate::cmd_job("mounts", mount_cmd, needs_priv));
                 }
 
                 if Path::new(&local_mp).exists()
-                    && ui.add_enabled(!self.busy, egui::Button::new(t("⏏ Smonta cartella"))).clicked()
+                    && ui.add_enabled(self.action_enabled(), egui::Button::new(t("⏏ Smonta cartella"))).clicked()
                 {
                     let umount_cmd = format!(
                         "fusermount -u {q_mp} 2>/dev/null || umount {q_mp}"

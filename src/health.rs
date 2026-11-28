@@ -1,3 +1,4 @@
+use crate::i18n::{t, tf};
 use crate::util::run_shell;
 use sysinfo::Disks;
 
@@ -64,7 +65,7 @@ pub fn run_checks() -> Vec<Check> {
         v.push(mk(
             "Configurazioni residue",
             Status::Warn,
-            format!("{n} pacchetti rimossi hanno ancora file di configurazione"),
+            tf("{} pacchetti rimossi hanno ancora file di configurazione", &[&n]),
             Some("dpkg -l | awk '/^rc/{print $2}' | xargs -r dpkg --purge"),
         ));
     }
@@ -96,8 +97,9 @@ pub fn run_checks() -> Vec<Check> {
         } else {
             Status::Ok
         };
-        let hint = if st == Status::Ok { "" } else { " — usa la scheda Pulizia per liberare spazio" };
-        v.push(mk("Spazio su disco (/)", st, format!("Occupato {used:.0}%{hint}"), None));
+        let pct = format!("{used:.0}%");
+        let hint = if st == Status::Ok { "" } else { t(" — usa la scheda Pulizia per liberare spazio") };
+        v.push(mk("Spazio su disco (/)", st, tf("Occupato {}{}", &[&pct, &hint]), None));
     }
 
     // 6. Sincronizzazione orologio
@@ -122,7 +124,7 @@ pub fn run_checks() -> Vec<Check> {
             v.push(mk(
                 "Pacchetti bloccati",
                 Status::Warn,
-                format!("In hold: {}", o.split_whitespace().collect::<Vec<_>>().join(", ")),
+                tf("In hold: {}", &[&o.split_whitespace().collect::<Vec<_>>().join(", ")]),
                 Some("apt-mark showhold | awk '{print $1 \" install\"}' | dpkg --set-selections"),
             ));
         }

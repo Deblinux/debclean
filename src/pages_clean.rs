@@ -1,4 +1,4 @@
-use crate::i18n::{t, tr};
+use crate::i18n::{t, tf, tr};
 use crate::{ui, util, App, Job, Msg, ProgressReporter};
 use eframe::egui;
 use std::fs;
@@ -205,7 +205,8 @@ pub(crate) fn delete_empty_items<F: FnMut(usize, usize, &str)>(
         }
         on_progress(ok + err, total, p.as_str());
     }
-    on_progress(list.len(), total, &format!("Eliminati {ok} elementi"));
+    let done = tf("Eliminati {} elementi", &[&ok]);
+    on_progress(list.len(), total, &done);
     (ok, err)
 }
 
@@ -276,7 +277,7 @@ impl App {
             ui.label(t("Esegue VACUUM e REINDEX sui database interni dei browser (Firefox, Chrome, Chromium, Brave) verificando prima che siano chiusi. Velocizza l'avvio e la barra degli indirizzi senza cancellare cronologia o segnalibri."));
         });
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Ottimizza database SQLite browser"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Ottimizza database SQLite browser"))).clicked() {
                 self.spawn(ctx, |ch| {
                     let mut prog = ProgressReporter::start(
                         &ch,
@@ -320,7 +321,7 @@ impl App {
             }
         });
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("Cerca"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("Cerca"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     let mut prog = ProgressReporter::start(
                         &ch,
@@ -378,7 +379,7 @@ impl App {
         });
 
         let n = selected.len();
-        if ui::primary_button(ui, t("Elimina selezionati"), !self.busy && n > 0).clicked() {
+        if ui::primary_button(ui, t("Elimina selezionati"), self.action_enabled() && n > 0).clicked() {
             let mut txt = format!(
                 "{} {}\n\n",
                 n,
@@ -405,7 +406,7 @@ fn rc_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.label(t("Pacchetti già disinstallati in passato che mantengono vecchi file di configurazione sul disco. La loro rimozione pulisce il sistema in sicurezza."));
         });
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Cerca residui rc"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Cerca residui rc"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     let prog = ProgressReporter::start(
                         &ch,
@@ -451,7 +452,7 @@ fn rc_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             });
 
             let count = self.rc_pkgs.iter().filter(|(_, sel)| *sel).count();
-            if ui::primary_button(ui, t("Elimina selezionati"), !self.busy && count > 0).clicked() {
+            if ui::primary_button(ui, t("Elimina selezionati"), self.action_enabled() && count > 0).clicked() {
                 let pkgs: Vec<String> = self.rc_pkgs.iter().filter(|(_, sel)| *sel).map(|(p, _)| p.clone()).collect();
                 let joined = pkgs.join(" ");
                 let script = format!("apt-get purge -y {joined} && echo 'Pulizia pacchetti rc completata'");
@@ -476,7 +477,7 @@ fn rc_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                     prog.finish(t("Purgatura completata"));
                     ch.send(Msg::RcPkgs(list));
                 });
-                self.confirm_snapshot(format!("Eliminare definitivamente i file di configurazione di {} pacchetti?", count_str), job);
+                self.confirm_snapshot(tf("Eliminare definitivamente i file di configurazione di {} pacchetti?", &[&count_str]), job);
             }
         }
     }
@@ -487,7 +488,7 @@ fn flatpak_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.label(t("Librerie e ambienti di esecuzione di Flatpak che non sono più necessari ad alcuna applicazione installata. Rimuoverli libera spazio su disco in sicurezza."));
         });
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Cerca runtime Flatpak inutilizzati"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Cerca runtime Flatpak inutilizzati"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     let prog = ProgressReporter::start(
                         &ch,
@@ -529,7 +530,7 @@ fn flatpak_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             });
 
             let count = self.flatpak_unused.iter().filter(|(_, sel)| *sel).count();
-            if ui::primary_button(ui, t("Disinstalla selezionati"), !self.busy && count > 0).clicked() {
+            if ui::primary_button(ui, t("Disinstalla selezionati"), self.action_enabled() && count > 0).clicked() {
                 let pkgs: Vec<String> = self.flatpak_unused.iter().filter(|(_, sel)| *sel).map(|(p, _)| p.clone()).collect();
                 let joined = pkgs.join(" ");
                 let script = format!("flatpak uninstall -y {joined} && echo 'Pulizia Flatpak completata'");
@@ -554,7 +555,7 @@ fn flatpak_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                     prog.finish(t("Rimozione completata"));
                     ch.send(Msg::FlatpakUnused(list));
                 });
-                self.confirm_snapshot(format!("Disinstallare permanentemente questi {} elementi Flatpak?", count_str), job);
+                self.confirm_snapshot(tf("Disinstallare permanentemente questi {} elementi Flatpak?", &[&count_str]), job);
             }
         }
     }
@@ -567,7 +568,7 @@ fn orphan_configs_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         });
         
         ui.horizontal(|ui| {
-            if ui.add_enabled(!self.busy, egui::Button::new(t("🔍 Cerca configurazioni orfane"))).clicked() {
+            if ui.add_enabled(self.action_enabled(), egui::Button::new(t("🔍 Cerca configurazioni orfane"))).clicked() {
                 self.spawn(ctx, move |ch| {
                     let mut prog = ProgressReporter::start(
                         &ch,
@@ -584,7 +585,7 @@ fn orphan_configs_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                         let total = entries.len();
                         for entry in entries {
                             checked += 1;
-                            prog.step(checked, total, format!("Verifica di {}", entry.file_name().to_string_lossy()));
+                            prog.step(checked, total, tf("Verifica di {}", &[&entry.file_name().to_string_lossy()]));
                             if let Ok(name) = entry.file_name().into_string() {
                                 let path = entry.path();
                                 if path.is_dir() {
@@ -629,7 +630,7 @@ fn orphan_configs_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             });
 
             let count = self.orphan_configs.iter().filter(|(_, sel)| *sel).count();
-            if ui::primary_button(ui, t("Elimina selezionati"), !self.busy && count > 0).clicked() {
+            if ui::primary_button(ui, t("Elimina selezionati"), self.action_enabled() && count > 0).clicked() {
                 let paths: Vec<std::path::PathBuf> = self.orphan_configs.iter().filter(|(_, sel)| *sel).map(|(p, _)| p.clone()).collect(); // Vettore di PathBuf
                 let count_str = count.to_string();
                 let job: Job = Box::new(move |ch| {
@@ -642,7 +643,7 @@ fn orphan_configs_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                     let _ = ch.send(Msg::Log(format!("✔ Eliminate {ok_count} cartelle di configurazione orfane")));
                     let _ = ch.send(Msg::OrphanConfigs(Vec::new()));
                 });
-                self.confirm_snapshot(format!("Eliminare definitivamente le cartelle di configurazione di questi {} elementi?", count_str), job);
+                self.confirm_snapshot(tf("Eliminare definitivamente le cartelle di configurazione di questi {} elementi?", &[&count_str]), job);
             }
         }
     }
@@ -744,7 +745,7 @@ fn orphan_configs_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
             (
                 "Origine",
                 "Ripristina le impostazioni che il computer aveva prima di usare DebUtility.",
-format!(
+                format!(
                     "ORIG_DIR=/var/lib/debutility; \
                      if [ ! -f \"$ORIG_DIR/power_orig\" ] && [ ! -s \"$ORIG_DIR/power_profile_orig\" ] && [ ! -s \"$ORIG_DIR/epp_orig\" ] && [ -d /var/lib/debclean ]; then ORIG_DIR=/var/lib/debclean; fi; \
                      if [ -f \"$ORIG_DIR/power_orig\" ] || [ -s \"$ORIG_DIR/power_profile_orig\" ] || [ -s \"$ORIG_DIR/epp_orig\" ]; then \
@@ -799,7 +800,7 @@ format!(
         ui.add_space(3.0);
         egui::ComboBox::from_label(t("Servizi comuni"))
             .selected_text(self.svc_name.clone())
-            .width(420.0)
+            .width(ui::fit_width(ui, 420.0, 160.0))
             .show_ui(ui, |ui| {
                 for (n, d) in SERVICES {
                     if ui.selectable_label(self.svc_name == n, format!("{n} — {}", t(d))).clicked() {

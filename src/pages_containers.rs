@@ -32,7 +32,7 @@ pub fn read_containers(runtime: &str) -> Vec<Container> {
 
 impl App {
     pub(crate) fn ui_containers(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui::title(ui, "Manager Container (Docker / Podman)");
+        ui::title(ui, t("Manager Container (Docker / Podman)"));
 
         let have_docker = util::run_shell("command -v docker >/dev/null 2>&1", false).0;
         let have_podman = util::run_shell("command -v podman >/dev/null 2>&1", false).0;
@@ -47,9 +47,9 @@ impl App {
 
         let runtime = if have_docker { "docker" } else { "podman" };
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(format!("{}: {}", t("Motore in uso"), runtime));
-                if ui::primary_button(ui, t("🧹 Pulisci spazio container (Prune)"), !self.busy).clicked() {
+                if ui::primary_button(ui, t("🧹 Pulisci spazio container (Prune)"), self.action_enabled()).clicked() {
                     let script = format!("{runtime} system prune -af --volumes");
                     self.confirm = Some((
                         t("Eliminare tutti i container fermi, volumi e immagini orfane non utilizzate?").into(),
@@ -68,15 +68,15 @@ impl App {
         } else {
             for c in containers {
                 ui::card(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui::led(ui, Some(c.running), "");
-                        ui.label(egui::RichText::new(&c.name).strong().size(18.0));
+                        ui.label(egui::RichText::new(&c.name).strong().size(18.0).color(ui::text_primary()));
                         ui.label(egui::RichText::new(format!("[{}]", c.image)).color(ui::text_dim()));
 
                         let id_q = util::shq(&c.id);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if c.running {
-                                if ui.add(egui::Button::new(t("Arresta")).fill(ui::BAD)).clicked() {
+                                if ui::danger_button(ui, t("Arresta"), true).clicked() {
                                     self.spawn(ctx, crate::cmd_job("containers", format!("{runtime} stop {id_q}"), false));
                                 }
                             } else {
