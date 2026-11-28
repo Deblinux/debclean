@@ -1,0 +1,67 @@
+# Chiavi visibili che non sono letterali diretti nei pattern generici di extract_keys.py.
+# Una chiave per riga: righe vuote e righe che iniziano con # vengono ignorate.
+# Gli spazi iniziali/finali fanno parte della chiave e vanno conservati.
+Cartelle vuote
+Cartelle che non contengono nulla. Eliminarle non fa perdere dati e rende l'archivio più ordinato.
+File vuoti (0 byte)
+File che non contengono dati. Spesso sono residui di operazioni interrotte.
+Attenzione: alcuni programmi usano file vuoti di proposito. Controlla l'elenco e deseleziona quelli che vuoi tenere.
+cartelle vuote verranno eliminate definitivamente:
+file vuoti verranno eliminati definitivamente:
+Avvio silenzioso
+Schermata grafica di avvio
+Utile solo se hai problemi con la grafica
+Swap compresso in RAM
+Consigliato con driver NVIDIA proprietario
+Pulizia rapida della cache utente all'avvio
+Per sicurezza DebUtility non salva la password di root: le operazioni privilegiate usano pkexec e il sistema chiede l'autorizzazione tramite la finestra di Polkit.
+Performance
+Origine
+In hold: 
+ pacchetti rimossi hanno ancora file di configurazione
+Occupato
+ — usa la scheda Pulizia per liberare spazio
+In carica
+Scarica
+Carica completa
+Stato sconosciuto
+n/d
+Online
+Offline
+(nessun output)
+CPU
+Servizi
+Apri Processi
+Dettagli Processi
+Ottimizza RAM / Zram
+Apri Ottimizza RAM
+Dettagli RAM
+Analizza Spazio
+Apri Disco
+Apri Servizi
+# Etichette dell'albero del menu applicazioni (pages_menu_editor.rs).
+Applicazioni
+Accessori
+Accesso universale
+Audio e video
+Giochi
+Grafica
+Internet
+Istruzione
+Programmazione
+Strumenti di sistema
+Ufficio
+Preferenze
+Amministrazione
+# Etichette dei gruppi utente (pages_admin.rs).
+Amministratore (sudo)
+Porte seriali Arduino/USB (dialout)
+VirtualBox (vboxusers)
+Docker (docker)
+# Cronologia e ripristino (restore_history.rs): etichette restituite da Kind::label()
+# e stati delle voci, tradotte con tr() al momento della visualizzazione.
+Backup repository APT
+File .bak di sistema
+Quarantena
+Disponibile
+Tutti i tipi

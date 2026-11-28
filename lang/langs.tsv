@@ -1,0 +1,20 @@
+# Registro autorevole delle lingue di DebUtility.
+# Formato: codice<TAB>nome mostrato nella GUI.
+# La prima riga non commentata e' la lingua originale delle chiavi (italiano): le sue
+# stringhe sono il fallback UTF-8 per le chiavi ancora non tradotte.
+# Aggiungendo una riga qui, tools/build_strings.py crea automaticamente la colonna
+# corrispondente in lang/strings.tsv e src/i18n.rs mostra la lingua nel selettore.
+# Il codice puo' essere una lingua (ll) o un locale con regione (ll_CC); il
+# riconoscimento del sistema prova prima il locale completo e poi la lingua madre.
+it	Italiano
+en	English
+es	Español
+fr	Français
+de	Deutsch
+pt	Português
+nl	Nederlands
+pl	Polski
+ru	Русский
+uk	Українська
+ro	Română
+cs	Čeština

@@ -1,10 +1,18 @@
+Config (/etc)
+Regola Udev
+Servizio / Cron
 Disinstallazione Chirurgica & Sandbox
+Monitora e pulisce a fondo l'intero ciclo di vita di un'applicazione. Rimuove non solo il pacchetto ma anche tutti i frammenti invisibili sparsi nel sistema (regole udev, file in /etc, registrazioni D-Bus e policy Polkit).
 Nome pacchetto o app da bonificare:
 Cerca Residui Invisibili
 Elementi e residui invisibili rilevati:
 Nessun residuo trovato o scansione non ancora avviata. Inserisci un nome e cerca.
 Esegui Bonifica Chirurgica Selezionati
 Dopo l'eliminazione premi di nuovo «Cerca Residui Invisibili» per aggiornare l'elenco.
+Eliminare definitivamente {} elementi di sistema?
+Pulizia di sistema in corso...
+Pulizia di sistema
+Pulizia in corso...
 ✘ Comando 'sqlite3' non trovato sul sistema. Installalo con: sudo apt install sqlite3
 ℹ Nessun database SQLite di browser trovato o idoneo all'ottimizzazione.
 Ottimo stato: autonomia vicina ai valori di fabbrica.
@@ -17,12 +25,11 @@ Usura avanzata: monitorare frequentemente i dati SMART.
 Stato di salute eccellente: nessun degrado anomalo.
 SSD operativo: parametri di temperatura e ore letti correttamente.
 Dati SMART non accessibili o periferica priva di sensori SMART.
-STATO DI DEGRADO BATTERIA
+Analisi predittiva dello stato di salute di SSD/NVMe e batteria: calcola l'usura reale delle celle, i cicli di carica e i Terabyte scritti per prevenire guasti hardware.
 Nessuna batteria rilevata (sistema desktop o sensore non disponibile).
 Salute reale:
 Capacità attuale vs Originale
 Cicli di carica completati
-ANALISI PREDITTIVA SSD E NVME
 Nessun disco SSD o NVMe rilevato.
 Vita utile residua stimata
 Usura
@@ -30,6 +37,15 @@ Ore di attività
 Dati scritti (TBW)
 Temperatura
 Guardiano Predittivo
+Stato di salute di batteria e archiviazione
+STATO DI DEGRADO BATTERIA
+Capacità, cicli e salute stimata
+ANALISI PREDITTIVA SSD E NVME
+Usura, dati scritti e temperatura
+ — usa la scheda Pulizia per liberare spazio
+{} pacchetti rimossi hanno ancora file di configurazione
+Occupato {}{}
+In hold: {}
 (spento o non attivo)
 Monitor
 Modello
@@ -52,8 +68,10 @@ Tutto in uno
 Tablet / convertibile
 Mini PC
 Altro
+Tipo di computer
 UEFI
 BIOS (legacy)
+Firmware di avvio
 Sistema e scheda madre
 Memoria RAM
 RAM totale
@@ -103,10 +121,12 @@ Processore
 Qui vedi quanta memoria RAM ha il computer e, premendo il pulsante, anche la marca, il tipo (DDR3, DDR4...) e la velocità di ogni modulo. Serve la password di amministratore perché questi dati si leggono dalla scheda madre.
 La scheda video (GPU) disegna tutto ciò che vedi sullo schermo. Qui trovi modello, produttore, driver in uso, memoria video e i monitor collegati.
 Elenco di tutti i componenti del computer: scheda madre, processore, memoria, schede video e audio, rete, dischi, USB, tastiera, webcam, monitor e batteria. Utile per sapere esattamente cosa c'è dentro il tuo PC.
+famiglia {} · modello {} · stepping {}
 Distribuzione
 Versione Debian
 Kernel
 Nome host
+Operazione in corso...
 Aggiornamento pacchetti APT in corso...
 Aggiornamento app Flatpak in corso...
 Applico la correzione...
@@ -122,13 +142,17 @@ Creazione snapshot di sicurezza...
 Operazione sui dischi in corso...
 Configurazione della pianificazione in corso...
 Configurazione VPN in corso...
-Operazione in corso...
 Attendo l'autorizzazione di amministratore...
 Completato
 Operazione terminata con errori
 Rilevamento del disco per GRUB...
+OK
+errore
+✔ Completato
+✘ Errore configurazione GRUB: usa la riparazione GRUB dedicata o verifica il disco di avvio
+✘ Privilegi di amministratore non concessi o annullati
+✘ Errore durante la correzione
 Verifica dello stato del sistema...
-Pulizia in corso...
 Pulizia completata
 Analisi completata
 Scansione dei punti di ripristino...
@@ -150,7 +174,11 @@ Nessun demone di telemetria noto attivo rilevato. (Premi 'Scansiona' per verific
 Disattiva e Blocca
 Blocco Rapido Domini di Telemetria (Hosts)
 Impedisci al sistema di contattare server noti di telemetria di grandi produttori bloccandoli a livello locale.
+Telemetry Microsoft (vortex.data.microsoft.com)
+Telemetria Errori Ubuntu (collector.ubuntu.com)
+Telemetria Nvidia (gfwsl.geforce.com)
 Blocca dominio
+Coda operazioni piena: attendi il completamento di quelle in corso.
 Crea snapshot di sicurezza prima di procedere
 Verrà creato uno snapshot prima di ogni rimozione; se la creazione fallisce la pulizia viene annullata.
 Nessuno strumento di snapshot rilevato: installa Timeshift o Snapper per usare questa opzione.
@@ -158,6 +186,9 @@ DebUtility pre-pulizia
 Snapshot non riuscito: operazione annullata
 Snapshot creato
 In corso...
+Coda operazioni
+In corso
+Annulla le operazioni in attesa
 Scansione spazio disco in corso...
 Pulizia della quarantena in corso...
 Pulizia della quarantena completata
@@ -173,6 +204,9 @@ Storico APT
 Qui puoi consultare il registro completo delle operazioni eseguite da APT sul sistema (installazioni, aggiornamenti e rimozioni di pacchetti).
 Ricarica Storico
 Nessuna transazione APT trovata o file di log non accessibile (/var/log/apt/history.log).
+Ordina per:
+Data/Ora
+Comando
 Annulla operazione
 Comando:
 Installati:
@@ -218,6 +252,17 @@ Aggiorna tutti gli Snap
 Nessun pacchetto Snap installato.
 Rimuovi
 Assicurati che snapd sia installato e attivo sul sistema.
+Uno o più processi stanno impegnando il processore o la coda di esecuzione è satura.
+Controlla i processi attivi se noti micro-blocchi nell'interfaccia.
+Nessuna saturazione del processore rilevata.
+L'uso intenso della swap rallenta sensibilmente l'apertura delle app e il cambio finestra.
+Valuta di chiudere programmi pesanti o configurare Zram per ridurre lo swap su disco.
+Margine di memoria adeguato per il funzionamento fluido.
+Con poco spazio libero il file system e la cache di sistema possono subire rallentamenti.
+Spazio su disco nella norma
+Nessuna partizione critica vicina alla saturazione.
+nessun dato
+Nessun servizio systemd in errore rilevato.
 Perché è lento adesso?
 Diagnostica in 1 clic su CPU, memoria/swap, spazio disco, processi e servizi.
 Diagnostica ora
@@ -226,6 +271,8 @@ Lettura dei contatori di sistema...
 Analisi dei processi e delle risorse...
 Diagnostica completata
 Premi «Diagnostica ora» per analizzare cosa sta impegnando il sistema in questo momento.
+ATTENZIONE
+CRITICO
 Report diagnostica
 Genera un report completo dello stato del sistema in formato HTML (pronto anche per la stampa in PDF), utile per l'assistenza tecnica.
 Sezioni da includere nel report:
@@ -326,6 +373,7 @@ MODALITÀ AMMINISTRATORE
 Pronto
 Conferma
 Annulla
+Operazione annullata: nessuna modifica è stata applicata.
 Chiudere DebUtility?
 Un'operazione è ancora in corso (pulizia, aggiornamento o altro). Se chiudi ora potrebbe interrompersi a metà e lasciare il sistema in uno stato incompleto.
 Ti consiglio di aspettare che finisca.
@@ -364,20 +412,42 @@ Spazio totale recuperabile:
 Nessun elemento sicuro da rimuovere.
 Attenzione
 Errore operativo durante la pulizia.
+--- Riparazione automatica GRUB ({}) ---
 Scansione punti di ripristino: {} trovati.
 Trovati {} punti di ripristino.
 Rimozione: {}
 Eliminati {} file scaduti dalla quarantena.
 Errore nella scadenza della quarantena: {}
+Operazione accodata: {}
+Operazioni in attesa annullate: {}
 ▶ {}: creazione snapshot di sicurezza...
 Snapshot di sicurezza ({})...
 ✘ Snapshot non riuscito ({}): pulizia annullata.
 ✔ Snapshot di sicurezza creato con {}.
+In corso: {}
+In attesa: {}
+{} — {} elementi
 Eliminati {} elementi scaduti.
+Avvio: {}
 Spostare {} backup di configurazione in quarantena? Potrai ripristinarli entro {} giorni.
 Spostati {} file in quarantena, {} non spostati.
+Eliminare definitivamente {} cartelle di configurazione in ~/.config? Le impostazioni dei programmi andranno perse.
+CPU sotto carico elevato ({}% · load 1m: {})
+Attività CPU moderata/alta ({}% · load 1m: {})
+CPU regolare ({}% · load 1m: {})
+Memoria quasi satura (RAM {}% · Swap {}%)
+Uso memoria sostenuto (RAM {}% · Swap {}%)
+RAM disponibile ({}% in uso)
+Spazio su disco quasi esaurito su {} ({})
+{} (CPU {}%, RAM {}%)
+{} servizio/i systemd in stato failed
+Unità: {}. Processo più attivo: {}
+Processo principale: {}
 {} elementi esaminati
+Analisi di {}
+Spazio totale rilevato: {}
 {} file · {} cartelle · {} errori
+File in modifica: {}
 Argomento non valido: {}
 Impossibile salvare lo stato della pulizia: {}
 Categoria non valida in --include/--exclude: {}
@@ -388,6 +458,7 @@ Pulizia
 Residui di sistema
 File duplicati
 Quarantena / Ripristino
+Cronologia e ripristino
 Fixer
 Aggiornamenti
 Pianificatore
@@ -483,16 +554,17 @@ Eliminare definitivamente i file di configurazione residui (.dpkg-old, .dpkg-dis
 Mostra servizi falliti
 Riavvia servizi falliti
 Riavviare tutte le unità systemd attualmente in stato failed?
+Kernel, Grub e Recovery
 Rimuovi i kernel obsoleti per liberare spazio. Il kernel in uso è protetto.
 in uso
 🗑 Rimuovi selezionati
-Governor CPU
+Il kernel è il cuore del sistema. Qui scegli come il processore bilancia velocità e consumi (governor) e quanto il sistema usa il disco al posto della RAM (swappiness). Se non sei sicuro, lascia i valori attuali.
 Gestione della frequenza non disponibile su questo sistema.
 Governor
 Applica governor
-Memoria virtuale (swappiness)
 vm.swappiness
 Applica swappiness
+GRUB è il programma che parte per primo e avvia Debian. I «parametri di avvio» sono opzioni passate al sistema quando si accende. Usa «Anteprima» per vedere cosa cambierebbe prima di salvare; se non sei sicuro, non modificare nulla.
 Parametri di avvio (GRUB_CMDLINE_LINUX_DEFAULT):
 Suggerimenti in base all'hardware:
 Caratteri non ammessi nei parametri.
@@ -503,6 +575,7 @@ Aggiorna GRUB
 ↩ Ripristina backup
 Ripristinare /etc/default/grub dal backup debutility.bak e aggiornare GRUB?
 Anteprima delle modifiche (non è stato cambiato nulla)
+Strumenti di emergenza per quando qualcosa smette di funzionare: riavviano audio e rete, ricostruiscono il menu di avvio (GRUB) o ripristinano Flathub. Usali solo se hai un problema preciso.
 🔊 Riavvia audio
 🌐 Riavvia rete
 Riavviare i servizi di rete?
@@ -524,7 +597,6 @@ Sorgenti software configurate:
 Aggiungi un repository (riga completa, es. "deb http://... suite componenti"):
 Aggiungi repository
 Aggiungere questo repository alle sorgenti APT?
-Release rilevata
 abilitati da DebUtility
 non abilitati da DebUtility
 I Backports non sono disponibili per questa release.
@@ -543,6 +615,7 @@ consigliato
 Hardware
 Alcuni pacchetti non sono disponibili: i componenti contrib/non-free potrebbero non essere abilitati.
 Abilita contrib e non-free
+Abilitare i componenti contrib e non-free di Debian?
 Installa selezionati
 ⭐ Seleziona consigliati
 Disattiva le applicazioni avviate automaticamente al login per ridurre i tempi di avvio.
@@ -558,21 +631,22 @@ Utente
 gruppo non presente
 ⚠ Attenzione: stai modificando il gruppo sudo (privilegi di amministratore). Controlla bene prima di confermare.
 ✔ Applica modifiche
+Modificare i gruppi dell'utente? Serve un logout o un riavvio per renderle attive.
 Le modifiche diventano attive dopo logout o riavvio.
 Percorso non valido o non consentito: {}
 Rimuovere {} kernel e aggiornare GRUB?
 Disabilitare {} sorgenti selezionate? Le righe verranno commentate e i file rinominati con .disabled; prima viene creato un backup.
 Rimuovere {} sorgenti selezionate? Verrà creato un backup e poi aggiornato l'elenco dei pacchetti.
+Release rilevata: {}
+Backports: {}
 Installare {} pacchetti driver/firmware?
 Controlla se il sistema ha problemi (pacchetti rotti, servizi fermi, disco quasi pieno...). Il segno ✔ verde significa che va tutto bene; se vedi ⚠ o ✘ premi «Correggi» accanto al problema, oppure «Correggi tutto».
-Il kernel è il cuore del sistema. Qui scegli come il processore bilancia velocità e consumi (governor) e quanto il sistema usa il disco al posto della RAM (swappiness). Se non sei sicuro, lascia i valori attuali.
-GRUB è il programma che parte per primo e avvia Debian. I «parametri di avvio» sono opzioni passate al sistema quando si accende. Usa «Anteprima» per vedere cosa cambierebbe prima di salvare; se non sei sicuro, non modificare nulla.
-Strumenti di emergenza per quando qualcosa smette di funzionare: riavviano audio e rete, ricostruiscono il menu di avvio (GRUB) o ripristinano Flathub. Usali solo se hai un problema preciso.
 I gruppi decidono cosa può fare il tuo utente: sudo = diventare amministratore, dialout = usare le porte seriali (Arduino), vboxusers = VirtualBox, docker = Docker. Spunta quelli che ti servono, premi «Applica modifiche» e poi riavvia la sessione.
 Fixer — diagnosi e riparazione
-Kernel, Grub e Recovery
 Avvio e Servizi
 Gestione permessi utente
+Governor CPU
+Memoria virtuale (swappiness)
 Kernel manager
 Kernel e prestazioni
 Grub
@@ -583,17 +657,16 @@ Repository Manager
 Programmi all'avvio
 Estensioni desktop
 Rete (USB)
-Abilitare i componenti contrib e non-free di Debian?
-Modificare i gruppi dell'utente? Serve un logout o un riavvio per renderle attive.
 nome file non valido
 ▶ Rilevo l'hardware...
-Gestione AppImage
+Percorso non valido
 Rileva le applicazioni AppImage in ~/Applications, ~/AppImages o ~/.local/bin e le integra nel menu delle applicazioni di sistema.
 Nessuna AppImage trovata. Copia i tuoi file .AppImage in ~/Applications o ~/.local/bin.
 nel menu
 Rimuovi dal menu
 Integra nel menu
 ▶ Avvia
+Gestione AppImage
 Gestore Avvio & Autostart Avanzato
 Analizza i tempi di boot di systemd e gestisci i programmi all'avvio utente con controllo dei ritardi (delay), ideale per window manager leggeri.
 ⏱ Tempi di Boot (Systemd)
@@ -609,6 +682,7 @@ Ritardo (secondi):
 Programmi registrati in autostart utente
 Nessun programma trovato in ~/.config/autostart/.
 🗑 Elimina
+(Ritardo: {}s)
 ▶ Eseguo systemd-analyze blame...
 ✔ Analisi avvio completata.
 Eliminazione elementi selezionati in corso...
@@ -688,10 +762,16 @@ Eseguire la manutenzione completa (TRIM, pulizia cache, ottimizzazione memoria)?
 Mostra gli ultimi eventi e messaggi di sistema registrati da journalctl. Utile per diagnosticare eventuali problemi.
 Usa i privilegi di amministratore (mostra tutti i messaggi)
 Filtro testo:
+Eliminati {} elementi
+Eliminare definitivamente i file di configurazione di {} pacchetti?
+Disinstallare permanentemente questi {} elementi Flatpak?
+Verifica di {}
+Eliminare definitivamente le cartelle di configurazione di questi {} elementi?
 Pulizia avanzata
 Risparmio energetico
 Ottimizzazione performance
 Log sistema
+Manager Container (Docker / Podman)
 Né Docker né Podman sono installati nel sistema.
 Installa docker.io o podman da terminale per gestire i container da qui.
 Motore in uso
@@ -701,25 +781,30 @@ Nessun container trovato su questo host.
 Arresta
 Avvia
 Log
-Manager Container (Docker / Podman)
 Estensioni Desktop
-Ambiente desktop rilevato
+Sconosciuto
 Nessuna estensione GNOME trovata o comando 'gnome-extensions' non presente.
 La gestione estensioni con toggle rapido è attualmente supportata nativamente per GNOME Shell.
+Ambiente desktop rilevato: {}
 cartelle esaminate
 Immagini non utilizzate
 Container fermi
 Cache di build
 Volumi orfani
 Lettura dell'utilizzo disco del motore container...
-Comando
 Cache registry Cargo
 Ultima modifica
 Ricerca di cartelle target/ nella home...
 inattiva da
 giorni
 Ricerca di cartelle node_modules nella home...
+Cache npm
+Cache Yarn
+Cache pnpm
+Store pnpm
 Analisi delle cache Python...
+Cache pip
+Cache uv
 Rilevamento degli strumenti installati...
 Scansione degli artefatti Rust...
 Scansione degli artefatti Node.js...
@@ -748,9 +833,23 @@ Nessun elemento da pulire rilevato.
 Strumento non installato: nessuna analisi disponibile.
 Inattivo >30 gg
 Le cartelle target/ e node_modules sono deselezionate di default: spuntale solo se vuoi ricostruirle.
+Cache utente (~/.cache)
+Miniature (.cache/thumbnails)
+Cache Firefox
+Cache Chrome / Chromium
+Cache Flatpak
+Cache pacchetti APT (/var/cache/apt)
+Video/Media
+Archivi/ISO
+Sviluppo/Build
+Documenti
+Sistema/Altro
 Home
 {} ({} byte)
 {} byte
+Individuazione file
+Confronto impronte (filtro rapido)
+Verifica SHA-256
 Ricercatore File Duplicati
 Trova ed elimina i file identici (confrontati tramite impronta SHA-256) sparsi nelle tue cartelle per recuperare spazio senza perdere dati.
 Cartella da scansionare:
@@ -765,11 +864,14 @@ Sposta selezionati in quarantena
 Spostamento duplicati in quarantena in corso...
 gruppi hanno tutte le copie spuntate: la prima di ogni gruppo verrà conservata.
 Gruppo
+{}: {} file ({})
 Spostare {} file duplicati ({}) in quarantena? Potrai ripristinarli entro {} giorni.
+{} #{} — {} ({} copie)
 Guida di DebUtility
 DebUtility riunisce in un'unica applicazione pulizia, riparazione, monitoraggio e amministrazione del sistema. Quando una funzione richiede i privilegi di amministratore, il sistema mostra una finestra per l'autorizzazione; le operazioni delicate chiedono sempre conferma prima di procedere. Qui sotto trovi la spiegazione di ogni funzione.
 Cerca nella guida:
 Nessun risultato per questa ricerca.
+DebUtility v{}
 Lettura dello spazio su /boot...
 Lettura dei pacchetti kernel installati...
 Individuazione del kernel in uso e del fallback...
@@ -779,6 +881,8 @@ Scansione kernel e /boot in corso...
 Scansione kernel completata
 Aggiornamento elenco kernel...
 Elenco kernel aggiornato
+Rimuovere definitivamente i kernel selezionati e aggiornare GRUB? Il kernel attuale e il fallback resteranno installati.
+Controlla lo spazio della partizione /boot e rimuovi solo i kernel vecchi. Il kernel in esecuzione e il secondo kernel più recente sono protetti e non possono essere selezionati.
 Scansiona kernel e /boot
 Rimuovi kernel selezionati
 Spazio su /boot
@@ -828,10 +932,12 @@ Esporta tutte le personalizzazioni dei lanciatori (~/.local/share/applications) 
 ✘ Inserire nome e comando per creare una voce.
 ✘ Impossibile aggiornare la voce: {}
 Modifica: {}
+Archivio non leggibile: {}
 ✔ Backup salvato con successo in: {}
 ✘ Errore durante la creazione del backup: {}
 ✘ File di backup non trovato in: {}
 ✘ Errore durante il ripristino del backup: {}
+Archivio non valido: {}
 ✔ Voce «{}» resa visibile su tutti i menu del desktop.
 ✔ Voce «{}» nascosta su tutti i menu del desktop.
 ✔ Voce «{}» salvata e menu aggiornati.
@@ -852,8 +958,11 @@ Strumento di rete non installato
 necessario per questo protocollo.
 Installa supporto condivisione
 Server / IP:
+es. 192.168.1.50 o nas.local
 Cartella remota:
+es. /Documenti o Media
 Utente (opzionale):
+es. mario
 Nome cartella locale:
 Punto di montaggio
 🔗 Monta cartella di rete
@@ -861,7 +970,33 @@ Punto di montaggio
 Monta o smonta in sicurezza chiavette USB, partizioni e cartelle di rete (SMB, NFS o SSHFS) senza usare il terminale.
 Dischi, USB e Condivisioni di Rete
 Dischi e USB
+Gestisci montaggio e smontaggio sicuro dei dispositivi
+Output
+Risultato delle operazioni di montaggio
+Condivisioni di rete
+Configura e monta SMB, NFS o SSHFS
 Condivisioni di rete (SMB / NFS / SSHFS)
+1. Informazioni Hardware e Kernel
+Sistema e Kernel
+Memoria RAM e Swap
+Processore (CPU)
+2. Spazio Disco e Partizioni
+Utilizzo File System
+Dispositivi a Blocchi
+Nessun pacchetto bloccato (hold).
+Nessun pacchetto danneggiato o parzialmente installato.
+3. Stato Pacchetti APT
+Pacchetti Bloccati (Hold)
+Audit Integrità Pacchetti
+4. Log di Errore Recenti (Avvio Corrente)
+Errori di Sistema (journalctl -p err)
+Errori del Kernel
+DebUtility - Report Diagnostica
+DebUtility — Report di Diagnostica di Sistema
+Host:
+Generato il:
+Impossibile salvare il file del report sul disco.
+Comando non disponibile ({}): {}
 UFW blocca i tentativi di accesso non autorizzati dalla rete.
 Stato
 🛡 Attiva firewall
@@ -932,6 +1067,7 @@ Rimuovere definitivamente i kernel selezionati e aggiornare GRUB?
 Monitor Connessioni Attive (TCP/UDP)
 Visualizza le socket TCP/UDP attive in ascolto o connesse e il relativo processo/programma per individuare comunicazioni di rete inattese.
 🔄 Aggiorna connessioni
+sconosciuto / permessi limitati
 Filtro:
 Nessuna connessione caricata o corrispondente al filtro. Premi 'Aggiorna connessioni'.
 Socket visualizzate
@@ -962,9 +1098,12 @@ Riabilita
 Audit Repository APT
 Scansiona /etc/apt/sources.list e /etc/apt/sources.list.d/* per individuare repository duplicati, Signed-By mancanti o non validi e sorgenti disabilitate.
 🔍 Scansiona repository APT
+✔ Nessuna anomalia rilevata nei file sorgente APT.
 Intervento rapido su file o riga sorgente APT
 File sorgente:
+/etc/apt/sources.list.d/esempio.list
 Pattern / Riga:
+es. ppa.launchpadcontent.net o buster
 💬 Commenta righe
 🗑 Rimuovi righe
 Punti di ripristino rilevati: {}
@@ -978,6 +1117,10 @@ Valida fino al {}
 Analizzate {} chiavi GPG ({} scadute, {} in scadenza).
 Disabilitare la chiave {} e commentare i repository associati in /etc/apt/sources.list*?
 Riabilitare la chiave {} e decommentare i repository associati in /etc/apt/sources.list*?
+⚠ [DISABILITATO] {}:{} -> {}
+✘ [SIGNED-BY ROTTO] {}:{} -> file mancante: {}
+✘ [KEYRING NON VALIDO] {}:{} -> {}
+⚠ [DUPLICATO] {}:{} -> {}
 Commentare le righe corrispondenti a '{}' in {} e aggiornare APT?
 Rimuovere definitivamente le righe corrispondenti a '{}' da {} e aggiornare APT?
 Copia le tue cartelle importanti (documenti, foto...) in un'altra posizione, meglio se su un disco esterno. Indica la sorgente e la destinazione e premi «Avvia backup».
@@ -996,30 +1139,41 @@ Punti di ripristino
 ▶ Lettura socket TCP/UDP attive e processi associati...
 ▶ Scansione chiavi GPG di repository e PPA in corso...
 ▶ Scansione sorgenti APT in /etc/apt/sources.list*...
-Audit permessi e file esposti
+Cartella .ssh deve essere accessibile solo dall'utente (700)
+Chiave pubblica non deve essere scrivibile da altri (644)
+Chiave privata o configurazione SSH deve essere 600
+File con permessi globali di scrittura a chiunque (777/666)
 Analizza file e cartelle sensibili (come ~/.ssh) per verificare che non siano leggibili o modificabili da altri utenti del sistema.
 Problemi rilevati
 Correggi tutti i permessi
 Impossibile correggere i permessi
 ✔ Ottimo! Nessun file sensibile o chiave con permessi aperti rilevati.
-Gestione chiavi SSH
 Visualizza le tue chiavi pubbliche da copiare su server remoti o GitHub, oppure crea una nuova coppia ed25519.
 ➕ Genera nuova chiave ED25519
+SSH-Agent attivo
+SSH-Agent non attivo o vuoto
 📋 Copia chiave pubblica
-Scanner Rootkit e Malware
 Esegue una scansione del sistema alla ricerca di rootkit, trojan e file modificati illegalmente usando chkrootkit o rkhunter.
 Né chkrootkit né rkhunter sono installati nel sistema.
 Installa chkrootkit e rkhunter
 🔍 Scansione rapida (chkrootkit)
 🔬 Scansione completa (rkhunter)
 Aggiorna firme rkhunter
+Audit permessi e file esposti
+Gestione chiavi SSH
+Scanner Rootkit e Malware
+Servizio mascherato dal sistema
 Gestore Servizi Systemd
 Visualizza, avvia, arresta o sblocca i servizi di sistema (inclusi quelli mascherati).
-Filtra servizi:
 Ricarica elenco
 Nessun servizio caricato. Premi 'Ricarica elenco' per scansionare il sistema.
+Servizio
+Descrizione
+[MASCHERATO]
 Smaschera e Attiva
 Ferma
+Avvia selezionati ({})
+Ferma selezionati ({})
 Cerca:
 Es. vlc, gimp, curl, htop...
 Aggiorna lista APT
@@ -1028,11 +1182,16 @@ Tutti
 Solo installati
 Non installati
 Pacchetto
-Descrizione
 Nessun pacchetto trovato con i filtri attuali.
+● Inst.
+○ Disp.
 Installa
 Purga
 Dettagli pacchetto (clicca un nome sopra) e Log APT
+Vuoi installare il pacchetto '{}'?
+Vuoi rimuovere '{}'?
+Vuoi eliminare '{}' e tutti i suoi file di configurazione?
+Dettagli pacchetto: {}
 Esplora, cerca, installa o rimuovi pacchetti DEB dai repository ufficiali. Clicca su un pacchetto per leggerne i dettagli.
 Gestore Pacchetti (Synaptic)
 Vedi le note di rilascio
@@ -1045,14 +1204,13 @@ Nessun problema rilevato.
 Stato del sistema
 Diagnosi completa
 Ottimizza ora
+Problemi
+Da recuperare
+Disco /
 Utilizzo CPU (ultimi 60 secondi)
 Utilizzo RAM (ultimi 60 secondi)
-Memoria
 zRAM: non attiva
-Dischi
 Nessuna interfaccia con IP
-Memoria e dischi (modelli)
-Scheda madre e BIOS
 Non rilevata (installa pciutils: sudo apt install pciutils)
 Verifica lo stato di salute dei dischi (richiede smartmontools).
 Dischi rilevati
@@ -1075,29 +1233,29 @@ Durata CPU (s):
 🔥 Stress CPU
 Memoria da testare (MB):
 🧪 Test RAM
+Un processo è un programma in esecuzione. Qui vedi quali consumano più CPU e memoria. Se un programma si blocca, premi «Termina» per chiuderlo con gentilezza; se non risponde usa «Kill».
 PID
 %CPU
 %MEM
 Termina
 Kill
 Chiusura forzata (SIGKILL)
-pacchetti
- (mostrati i primi 300: usa la ricerca)
+I pacchetti APT sono i programmi installati dal gestore software di Debian. Cerca il nome e premi il cestino per disinstallare quello che non ti serve: ti verrà chiesta conferma.
+Flatpak è un altro modo di installare programmi: ognuno vive in una «scatola» separata dal resto del sistema. Qui vedi le app Flatpak e puoi disinstallarle con il cestino.
 Versione
 Disinstalla
 Crea una memoria compressa virtuale nella RAM fisica per migliorare le prestazioni quando la memoria scarseggia.
 Dimensione zRAM (MB)
 ⚡ Ottimizza RAM
 ⏻ Disattiva zRAM
-Stato attuale
 zRAM non attiva.
 Nota: la configurazione vale fino al riavvio.
 La regolazione della frequenza del processore non è disponibile su questo sistema.
 Modalità di raffreddamento
 Riduce al 70% la velocità massima del processore e attiva il profilo a basso consumo: il computer produce meno calore e le ventole girano più piano. Utile se il PC scalda troppo; i programmi pesanti saranno un po' più lenti.
-Raffreddamento attivo
 Raffreddamento non attivo (velocità normale)
 Attiva modalità di raffreddamento
+La modalità di raffreddamento è già attiva.
 Attivare la modalità di raffreddamento? Il processore sarà limitato al 70% della velocità massima.
 Disattiva e ripristina
 Nessun sensore rilevato. Installa e configura lm-sensors: sudo apt install lm-sensors && sudo sensors-detect
@@ -1107,7 +1265,6 @@ Connessione Internet
 🔍 Test diagnostico
 ♻ Ripristina rete e Wi-Fi
 Riavviare NetworkManager? La connessione cadrà per qualche secondo.
-Interfacce
 Informazioni su DebUtility
 Strumento di manutenzione, diagnosi e configurazione per Debian, scritto in Rust.
 Obiettivo: riunire in un'unica interfaccia pulizia, riparazione, monitoraggio e amministrazione del sistema.
@@ -1118,29 +1275,81 @@ Programma sviluppato con il supporto e la collaborazione dell'Intelligenza Artif
 Note legali e Sicurezza
 Licenza: software Open Source.
 Avviso di sicurezza: molte operazioni modificano il sistema. Esegui sempre un backup dei dati importanti prima di procedere.
+Stress CPU completato: {} thread per {} s ({} cicli). Nessun blocco o errore rilevato.
+Memoria insufficiente per allocare {} MB.
+Test RAM su {} MB superato: 0 errori (4 pattern + test indirizzi).
+ATTENZIONE: {} errori rilevati durante il test RAM su {} MB!
 Nuova versione disponibile: {}
 {} problemi richiedono attenzione
 {} avvisi da controllare nel Fixer.
+{} thread
+Swap: {} / {}
 zRAM attiva: {} (algoritmo {}), dati {} → compressi {}
+Core {}: {}% — {} MHz
+Flag CPU ({})
+Gateway: {}
 Eliminare definitivamente {} file? L'operazione non è reversibile.
+Termina selezionati ({})
+Kill selezionati ({})
+Disinstalla selezionati ({})
+Disinstallare {} pacchetti selezionati?
 Disinstallare «{}»?
 Occupazione: {} / {}
 Algoritmo di compressione: {}
 Rapporto di compressione: {}:1
-Un processo è un programma in esecuzione. Qui vedi quali consumano più CPU e memoria. Se un programma si blocca, premi «Termina» per chiuderlo con gentilezza; se non risponde usa «Kill».
-I pacchetti APT sono i programmi installati dal gestore software di Debian. Cerca il nome e premi il cestino per disinstallare quello che non ti serve: ti verrà chiesta conferma.
-Flatpak è un altro modo di installare programmi: ognuno vive in una «scatola» separata dal resto del sistema. Qui vedi le app Flatpak e puoi disinstallarle con il cestino.
+Raffreddamento attivo ({} / {} MHz)
 Le tre spie dicono se il router (gateway), il DNS (che traduce i nomi dei siti in indirizzi) e Internet funzionano: verde = ok, rosso = problema. «Test diagnostico» le ricontrolla; «Ripristina rete e Wi-Fi» riavvia la rete se qualcosa non va.
 Info hardware e sistema
 Ottimizza RAM (zRAM)
 Monitor temperature
+Indicatori
+Panoramica immediata del sistema
+Accessi rapidi
+Gli strumenti più usati, a portata di clic
+Stato in tempo reale
+Andamento
+Informazioni di sistema
+Informazioni principali sul sistema
+Memoria
+RAM, swap e memoria compressa
+Dischi
+Spazio utilizzato sui volumi montati
+Stato di connessione e interfacce
+Modello, core e utilizzo in tempo reale
+Memoria e dischi (modelli)
+Capacità RAM e dispositivi a blocchi
+Scheda madre e BIOS
+Identificativi della piattaforma
+GPU rilevate dal sistema
+Interfacce e gateway predefinito
+Salute disco
+Verifica lo stato S.M.A.R.T. dei dispositivi
+Risultato S.M.A.R.T.
+Output dei controlli sul disco selezionato
+File grandi
+Trova file pesanti e poco usati nella home
+Spazio disco
+Calcola la dimensione delle cartelle principali
+Risultato
+Cartelle ordinate per dimensione
+Stress test
+Metti sotto sforzo CPU e RAM per verificare la stabilità
+Output del test eseguito
+Memoria compressa nella RAM per migliorare la reattività
+Stato attuale
+Utilizzo e compressione della zRAM
+Risultato delle operazioni zRAM
+Sensori termici rilevati dal sistema
+Diagnostica di rete
+Verifica rapida di gateway, DNS e Internet
+Interfacce
+Indirizzi e interfacce di rete attive
+Output rete
+Risultato dei comandi di rete
 Info
 Hardware e rete
 Tutti i componenti
 Analisi disco
-File grandi
-Spazio disco
-Stress test
 Pacchetti APT
 Pacchetti Flatpak
 Uptime
@@ -1155,7 +1364,19 @@ Proteggi i tuoi dati
 Sicurezza
 Firewall e porte
 Percorso non valido.
+File salvato correttamente (copia precedente in .bak).
 Salvataggio fallito o autorizzazione negata.
+Caricato con successo: {}
+Errore di lettura: {}
+Errore creazione file temporaneo: {}
+Errore scrittura file temporaneo: {}
+Sintassi fstab non valida! {}
+Impossibile validare fstab (mount non disponibile): {}
+Salvataggio fallito: {}
+Errore esecuzione pkexec: {}
+Font (Caratteri)
+Icone
+Tema GTK / Cursore
 Home utente non disponibile.
 Nome file non valido.
 ✔ Cache font aggiornata.
@@ -1187,13 +1408,13 @@ Tempo limite raggiunto: la pulizia di prova è ancora in corso.
 Nessuna esecuzione pianificata
 Il servizio di pulizia è terminato con errore.
 Test completato: esito e log aggiornati nella scheda.
-Automazione con Timer Systemd
+Pianificatore di Manutenzione
+Configura un'attività di sistema in background che avvia DebUtility in modalità headless alle ore impostate. L'esito e lo spazio liberato vengono salvati in un file di stato leggibile da questa scheda.
 Pianificazione attiva
 Aggiorna stato
 Esecuzione riuscita
 Esecuzione con errori
 Nessuna esecuzione registrata
-Configurazione
 Frequenza
 Ogni giorno alle 03:30, ogni lunedì alle 03:30 o il primo del mese alle 03:30.
 Da includere nella pulizia
@@ -1211,7 +1432,6 @@ Impostazioni salvate
 Le modifiche salvate richiedono «Aggiorna pianificazione» per avere effetto.
 Esecuzione di prova avviata.
 Log dell'ultima esecuzione
-Timer attivi nel sistema
 Mostra tutti i timer utente
 Stato timer TRIM SSD (root)
 Errore nella configurazione del timer: {}
@@ -1228,8 +1448,9 @@ Categorie: {}
 Errore nella lettura dello stato del timer: {}
 File di stato: {}
 OnCalendar: {}
-Configura un'attività di sistema in background che avvia DebUtility in modalità headless alle ore impostate. L'esito e lo spazio liberato vengono salvati in un file di stato leggibile da questa scheda.
-Pianificatore di Manutenzione
+Automazione con Timer Systemd
+Configurazione
+Timer attivi nel sistema
 ▶ Cerco aggiornamenti...
 Controllo gli aggiornamenti Flatpak...
 Controllo aggiornamenti Flatpak...
@@ -1299,18 +1520,64 @@ Scadenza automatica dopo {} giorni
 Eliminare definitivamente {}? L'operazione non è reversibile.
 Percorso originale
 Modulo di origine
+Lettura annullata: autorizzazione di amministratore non concessa.
+Usa il ripristino della Quarantena per questo elemento.
+Percorso del backup non valido.
+Usa l'eliminazione della Quarantena per questo elemento.
+Ripristino in corso...
+Eliminazione in corso...
+Operazione annullata: autorizzazione di amministratore non concessa.
+Ripristino completato
+Lettura dei backup protetti in corso...
+Elenco aggiornato.
+Aggiornamento elenco completato
+Un unico elenco raccoglie i backup dei repository APT, i file .bak creati da DebUtility e gli elementi in Quarantena. Puoi ordinare, filtrare, ripristinare o eliminare una voce con conferma.
+Operazioni reversibili registrate
+Le voci lette in /etc richiedono pkexec per essere modificate.
+Ricarica con privilegi
+Richiede pkexec per leggere le cartelle protette
+Alcuni backup in /etc non sono leggibili senza privilegi: usa «Ricarica con privilegi» per includerli.
+Ripristina selezionata
+Elimina selezionata
+Nessuna operazione reversibile trovata.
+Richiede autorizzazione di amministratore (pkexec)
+Impossibile leggere i backup protetti: {}
+Errore durante il ripristino: {}
+Errore durante l'eliminazione: {}
+Ripristinare il file in {}?
+Ripristinare il backup {} in {}? Il file attuale verrà sovrascritto.
+{} voci nella cronologia
+Stato: {}
+Tutti i tipi
+Backup repository APT
+File .bak di sistema
+Quarantena
+Origine
+Posizione del backup
 Timeshift
 Cartella snapshot
 Rilevamento di Timeshift...
 Ricerca delle cartelle snapshot...
 Lettura dell'elenco Timeshift...
 Scansione snapshot: {} ({}/{})
+Saltato ora perché un browser è aperto
+Riparazione pacchetti e dipendenze
+Completa configurazioni APT/dpkg interrotte e sistema dipendenze rotte senza forzare rimozioni.
+Cache dei browser
+Svuota solo i file temporanei della cache. Non tocca password, preferiti, cronologia o cookie.
+Cache pacchetti APT
+Rimuove i file .deb già installati e non più necessari. Non disinstalla alcun programma.
+Log obsoleti in /var/log
+Elimina solo i vecchi file di log compressi o ruotati (.gz, .old, numerati).
+Miniature (Thumbnails)
+Pulisce le anteprime salvate. Verranno rigenerate automaticamente se serve.
+Compattazione database SQLite
+Ottimizza i database dei browser chiusi senza cancellare dati o credenziali.
 Riparazione pacchetti e dipendenze...
 Operazioni di sistema completate.
 Servono verifiche manuali.
 Cache pacchetti APT...
 Cache dei browser...
-Saltato ora perché un browser è aperto
 Miniature (thumbnails)...
 Compattazione database SQLite...
 Comando 'sqlite3' non trovato sul sistema.
@@ -1319,6 +1586,7 @@ Riepilogo...
 Riepilogo: {} completate, {} saltate, spazio liberato {}.
 Liberati {}
 {} elementi saltati
+Blindatura & Security Hardening
 Applica best-practice di sicurezza enterprise per blindare il kernel Linux, proteggere la rete contro attacchi comuni (SYN flood, spoofing), verificare i permessi critici e controllare le porte aperte.
 🔐 Hardening Kernel & Parametri di Rete (Sysctl)
 Applica parametri di sicurezza avanzati per prevenire SYN flood, IP spoofing, limitare i dump di memoria e proteggere il routing. Verrà creato un file di configurazione persistente in /etc/sysctl.d/99-debutility-hardening.conf.
@@ -1330,7 +1598,21 @@ Controlla che i file di sistema cruciali (/etc/passwd, /etc/shadow, /etc/sudoers
 🌐 Analisi Porte Locali e Servizi in Ascolto
 Elenca tutte le porte di rete aperte sul computer e i relativi programmi associati, per identificare eventuali servizi esposti non necessari.
 📋 Mostra Porte e Servizi in Ascolto
-Blindatura & Security Hardening
+Snap non è installato sul sistema.
+Impossibile eseguire il comando snap.
+Il servizio snapd non è attivo sul sistema.
+Memoria RAM esaurita: il sistema ha chiuso dei programmi
+Il kernel ha attivato l'OOM Killer. Ottimizziamo la swappiness e liberiamo la cache.
+Ottimizza RAM e Swappiness
+Un servizio di sistema non si è avviato
+Uno o più servizi systemd sono in errore. Possiamo azzerare lo stato di errore.
+Resetta servizi systemd falliti
+Manca un firmware per una periferica
+Il kernel non trova i binari di alcune periferiche. Aggiorniamo i pacchetti firmware.
+Installa/aggiorna pacchetti firmware
+Problemi con i pacchetti installati (DPKG/APT bloccato)
+Il gestore pacchetti è rimasto bloccato da un'installazione interrotta.
+Sblocca e ripara database pacchetti
 Nessun errore trovato: il sistema non ha registrato errori in questo avvio.
 Assistente Correzione Crash & Errori
 In base agli errori riscontrati nei log, DebUtility può applicare le seguenti correzioni automatiche:
@@ -1338,13 +1620,21 @@ Vuoi applicare questa correzione automatica al sistema?
 Possibili soluzioni
 Non ho una soluzione specifica per questi errori. Molti messaggi sono innocui se il computer funziona bene; se noti problemi, copia la riga dell'errore e cercala online.
 In base agli errori trovati ecco cosa puoi provare:
+Ubuntu Crash Report Daemon (invia crash report automaticamente)
+Apport Crash Collector (raccoglie e invia segnalazioni di errori)
+Servizio generico di telemetria di terze parti
+Demone di raccolta dati diagnostici
 Home dell'utente non disponibile: impossibile scrivere le unità systemd.
 Sicura
 Con cautela
 Delicato
+Filtro rapido...
+Svuota filtro
+Nessuno
 Livello di rischio
 Menu bloccato: attendi il completamento dell'operazione.
 (nessun output)
+{} selezionati
 MANUTENZIONE
 SISTEMA
 AMMINISTRATORE
@@ -1352,11 +1642,9 @@ SICUREZZA E DATI
 AIUTO
 File temporanei
 File in /tmp e /var/tmp non modificati da più di 2 giorni (richiede password)
-Cache pacchetti APT
 Rimuove i .deb scaricati e non più necessari (richiede password)
 Pacchetti orfani
 apt autoremove --purge: dipendenze non più usate (richiede password)
-Cache dei browser
 Firefox, Chrome, Chromium, Brave. Chiudi i browser prima di pulire
 Cronologia e cookie dei browser
 Firefox, Chrome, Chromium: operazione irreversibile
@@ -1364,13 +1652,11 @@ Cache della RAM
 Svuota page cache e buffer temporanei (richiede password)
 Log del journal
 Mantiene solo gli ultimi 7 giorni di log systemd (richiede password)
-Log obsoleti in /var/log
 File ruotati e compressi (.gz, .1, .old) (richiede password)
 Cache utente
 Contenuto di ~/.cache (esclude cartelle sensibili)
 Cestino
 File nel cestino dell'utente
-Miniature (Thumbnails)
 Cache delle miniature di immagini e video (Nautilus/Dolphin)
 Cache Discord
 File temporanei e cache accumulati da Discord
@@ -1469,15 +1755,41 @@ Swap compresso in RAM
 Consigliato con driver NVIDIA proprietario
 Per sicurezza DebUtility non salva la password di root: le operazioni privilegiate usano pkexec e il sistema chiede l'autorizzazione tramite la finestra di Polkit.
 Performance
-Origine
  pacchetti rimossi hanno ancora file di configurazione
- — usa la scheda Pulizia per liberare spazio
 In carica
 Scarica
 Carica completa
 Stato sconosciuto
 Online
 Offline
+CPU
+Servizi
+Apri Processi
+Dettagli Processi
+Ottimizza RAM / Zram
+Apri Ottimizza RAM
+Dettagli RAM
+Analizza Spazio
+Apri Disco
+Apri Servizi
+Applicazioni
+Accessori
+Accesso universale
+Audio e video
+Giochi
+Grafica
+Internet
+Istruzione
+Programmazione
+Strumenti di sistema
+Ufficio
+Preferenze
+Amministrazione
+Amministratore (sudo)
+Porte seriali Arduino/USB (dialout)
+VirtualBox (vboxusers)
+Docker (docker)
+Disponibile
 Giornaliera
 Settimanale
 Mensile
@@ -1504,6 +1816,8 @@ Scansiona le cartelle selezionate per individuare i file identici tramite impron
 Controlla sempre l'elenco prima di confermare: il primo file di ogni gruppo viene conservato. Le copie spostate restano recuperabili per 7 giorni dalla scheda Quarantena / Ripristino.
 Raccoglie i singoli file spostati via dalle schede File duplicati e Residui di sistema (backup di configurazione). Per ogni file mostra il percorso originale, la data, la dimensione e il modulo di origine. Puoi ripristinarlo esattamente dov'era, eliminarlo definitivamente dopo averlo controllato oppure lasciare che scada automaticamente dopo 7 giorni. La cartella è privata e non sostituisce gli snapshot di sistema.
 Livello di rischio: con cautela. Il ripristino non sovrascrive un file già presente nel percorso originale: se esiste, prima sposta o rinomina quel file. Dopo la scadenza i file vengono eliminati senza recupero; per operazioni su cartelle o su più file usa gli snapshot di Timeshift/Snapper, non questa scheda.
+Riunisce in un unico elenco i backup delle sorgenti APT creati in /etc/apt/debutility-backups/, i file .bak di GRUB e dei file di sistema e le voci ancora presenti in Quarantena. Puoi filtrare per tipo, cercare per percorso o stato, ordinare per data e selezionare una voce per ripristinarla o eliminarla. La vista segnala quali voci richiedono autorizzazione di amministratore.
+Il ripristino sovrascrive il file attuale con la copia salvata e, per GRUB, aggiorna la configurazione di avvio: la conferma è obbligatoria. L'eliminazione è definitiva. Se l'elenco in /etc non è leggibile, usa «Ricarica con privilegi»; un rifiuto della finestra pkexec lascia il sistema invariato e mostra un messaggio di annullamento.
 Pianificatore di manutenzione
 Crea un timer systemd utente che avvia direttamente DebUtility in modalità headless (--clean --yes --json) ogni giorno, ogni settimana o una volta al mese alle 03:30. Puoi scegliere le categorie da includere: cache utente e dei browser, miniature, residui APT/Flatpak, log, file temporanei e file/cartelle vuote. La scheda mostra lo stato del timer, la prossima esecuzione, l'esito dell'ultima pulizia con lo spazio liberato e il log; «Esegui test ora» avvia subito il servizio senza aspettare la scadenza.
 Le categorie contrassegnate con • richiedono l'autorizzazione di amministratore tramite pkexec durante l'esecuzione pianificata. Disattivando o rimuovendo la pianificazione vengono fermati sia il timer sia il servizio; l'ultimo log resta disponibile per la diagnosi.
@@ -1517,7 +1831,7 @@ Controlla lo stato di salute del sistema (pacchetti, dipendenze, servizi, spazio
 Le correzioni modificano pacchetti e servizi: leggi il problema prima di applicarle, verifica i file .dpkg-dist prima di eliminarli se hai personalizzato una configurazione e controlla quali unità sono fallite prima di riavviarle in blocco.
 Controlla se ci sono aggiornamenti per i pacchetti APT (il sistema Debian e i suoi programmi) e per le app Flatpak. Puoi aggiornare solo APT, solo Flatpak o tutto con un clic.
 Durante l'aggiornamento non spegnere il computer: alla fine potrebbe servire un riavvio.
-Analizza il registro di sistema (/var/log/apt/history.log) per mostrare l'elenco cronologico di tutte le transazioni APT eseguite. Per ogni operazione visualizza data, comando esatto e l'elenco dei pacchetti installati, aggiornati o rimossi.
+Analizza il registro di sistema (/var/log/apt/history.log) per mostrare l'elenco cronologico di tutte le transazioni APT eseguite. Puoi filtrare rapidamente per data, comando o pacchetti, ordinare per data/ora o comando e vedere il contatore «X / Y» delle transazioni visibili. Per ogni operazione visualizza data, comando esatto, pacchetti toccati e l'eventuale annullamento.
 Gestisci i pacchetti Snap installati sul sistema. Puoi visualizzare l'elenco dei pacchetti con le relative versioni ed editori, aggiornarli tutti contemporaneamente o rimuovere singolarmente quelli non necessari.
 La rimozione richiede i privilegi di amministratore e l'esecuzione del demone snapd sul sistema.
 Analizza Docker/Podman e gli strumenti di sviluppo (Rust/Cargo, Node.js, Python). Mostra immagini e container inutilizzati, cartelle target/ e node_modules inattive e cache dei gestori di pacchetti, con dimensione e data dell'ultima modifica. Spunta gli elementi da eliminare e premi «Pulisci selezionati».
@@ -1525,15 +1839,14 @@ Le cartelle target/ e node_modules sono deselezionate di default: ricostruirle p
 Sei schede: Info (sistema, memoria, dischi, rete), Hardware e rete (processore, scheda madre, modelli dei dischi, gateway), Memoria RAM (marca, tipo e velocità di ogni modulo), Scheda video (modello, driver, memoria video, monitor), Tutti i componenti (elenco completo del computer) e About. Serve a sapere esattamente che computer hai.
 Mostra il tipo di ogni disco (SSD, NVMe, HDD, USB). Analisi disco controlla la salute con SMART, File grandi trova i file pesanti e inutilizzati, Spazio disco calcola la dimensione delle cartelle e Stress test mette sotto sforzo CPU e RAM per scoprire instabilità.
 Lo stress test porta il computer al limite: salva il lavoro prima di avviarlo.
-Analisi predittiva dello stato di salute di SSD/NVMe e batteria: calcola l'usura reale delle celle, i cicli di carica e i Terabyte scritti per prevenire guasti hardware.
 Esplora le cartelle del file system per individuare a colpo d'occhio quali file o directory occupano più spazio, permettendo di navigare tra le directory e analizzarne i contenuti in modo visivo.
 Analizzatore Disco (Treemap)
 Scansiona una cartella e ne visualizza il contenuto come mappa di rettangoli proporzionali alla dimensione: clic su un rettangolo per entrare nella cartella, «Torna su» per risalire. Il pannello «Top 20 file più pesanti» elenca i file più grandi dell'intero sottoalbero.
 Il tasto destro offre «Sposta nel cestino» ed «Elimina definitivamente»: quest'ultima operazione non è reversibile.
-Elenca i programmi in esecuzione con la CPU e la memoria che usano. «Termina» chiede al programma di chiudersi, «Kill» lo chiude con la forza se non risponde.
-Chiudere un processo di sistema può rendere instabile il computer.
-Elenca i pacchetti APT e le app Flatpak installati e permette di disinstallarli. Usa la ricerca per trovare subito quello che cerchi.
-La disinstallazione chiede conferma ma non si può annullare.
+Elenca i programmi in esecuzione con la CPU e la memoria che usano. Puoi filtrare rapidamente per nome, PID o utente, ordinare le colonne (PID, utente, CPU, memoria, comando) con indicatore ▲/▼ e selezionare più processi per terminarli o chiuderli con la forza in blocco. Il contatore «X / Y» mostra quanti elementi sono visibili rispetto al totale.
+Chiudere un processo di sistema può rendere instabile il computer. Le azioni in blocco si applicano solo ai processi selezionati visibili.
+Elenca i pacchetti APT e le app Flatpak installati e permette di disinstallarli. La ricerca filtra in tempo reale, le intestazioni Pacchetto e Versione sono ordinabili, e puoi selezionare più elementi con selezione/deselezione rapida per disinstallarli in un'unica conferma. Il contatore «X / Y» indica gli elementi filtrati rispetto al totale della scheda.
+La disinstallazione chiede conferma ma non si può annullare. Nelle azioni multiple verifica bene la selezione prima di confermare.
 Container (Docker / Podman)
 Permette di monitorare i container in esecuzione o fermi, leggere gli ultimi log, avviarli, arrestarli ed eseguire «Prune» per liberare lo spazio occupato da immagini orfane e volumi abbandonati.
 Il Prune elimina definitivamente i container fermi e le immagini non associate ad alcun contenitore.
@@ -1594,3 +1907,32 @@ Il Pianificatore usa --include con le categorie scelte nella scheda.
 Codici di uscita e JSON
 Il codice 0 indica successo, 1 un errore operativo, 2 argomenti non validi o --yes mancante. Con --json i campi sono mode, timestamp, status, exit_code, selected, total_recoverable_bytes, freed_bytes, freed_human, entries, logs e warnings. Con --clean viene scritto anche lo stato dell'ultima esecuzione in ~/.local/state/debutility, dove lo legge il Pianificatore.
 Questa schermata spiega ogni funzione di DebUtility. Usa la ricerca per trovare subito l'argomento che ti interessa.
+Chiudi i programmi che non usi e controlla i «Processi» più pesanti. Attiva la zRAM in «Ottimizza RAM» per avere più margine. Se succede spesso, il computer ha poca RAM per l'uso che ne fai.
+Disco pieno
+Libera spazio con «Pulizia» (anche «Pulizia avanzata») ed elimina i file grandi da «Disco» → «File grandi».
+Errori di lettura o scrittura del disco: il disco potrebbe essere in avaria
+Fai subito un backup dei dati importanti, poi controlla la salute del disco in «Disco» → «Analisi disco» → «Stato e attributi». Se il disco risulta danneggiato, valuta di sostituirlo.
+Un servizio non si è avviato
+Apri il «Fixer» e premi «Correggi» su «Servizi systemd», oppure in «Pulizia» → «Servizi di sistema» controlla lo stato del servizio e riavvialo.
+Un programma si è chiuso in modo anomalo (crash)
+Riavvia il programma. Se succede ancora, aggiornalo dalla scheda «Aggiornamenti» oppure reinstallalo da «App installate».
+Manca un firmware per una periferica (Wi-Fi, scheda video, audio...)
+Apri «Repository e driver», premi «Rileva hardware e driver» e installa i firmware consigliati. Poi riavvia il computer.
+Problemi con la connessione di rete
+Apri la scheda «Rete»: premi «Test diagnostico» e, se una spia è rossa, «Ripristina rete e Wi-Fi». Controlla anche il cavo o il segnale Wi-Fi.
+Il processore si surriscalda
+Pulisci dalla polvere le prese d'aria e le ventole. In «Temperature» attiva la «Modalità di raffreddamento» finché il problema non si risolve.
+Tentativi di accesso con password errata
+Se non sei stato tu, cambia la password e attiva il firewall in «Sicurezza e firewall». Se sei stato tu, puoi ignorare il messaggio.
+Un dispositivo USB non viene riconosciuto
+Prova un'altra porta USB o un altro cavo e collega il dispositivo direttamente al computer, senza hub.
+Avviso ACPI del BIOS (molto comune)
+Di solito è innocuo e si può ignorare se il computer funziona bene. Un aggiornamento del BIOS del produttore può eliminarlo.
+Problema con il Bluetooth
+In «Pulizia» → «Servizi di sistema» controlla il servizio bluetooth e avvialo; in «Repository e driver» installa i firmware consigliati.
+Problema con l'audio
+In «Kernel, Grub e Recovery» → «Recovery» premi «Riavvia audio». Se non basta, riavvia il computer.
+Problemi con i pacchetti installati
+Apri il «Fixer» e premi «Correggi tutto», oppure «Correggi dipendenze rotte» e «Riconfigura pacchetti».
+Errori della scheda video
+Installa i driver adatti in «Repository e driver» → «Driver manager» e aggiorna il sistema da «Aggiornamenti». Se il problema resta, prova ad avviare con un kernel diverso.
